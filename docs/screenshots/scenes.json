@@ -1,0 +1,89 @@
+{
+  "comment": "Scene manifest for scripts/screenshots.mjs. These screenshots serve two jobs at once: they are embedded in the product docs (README + docs/guide/), and they are the visual-regression baselines CI compares against. Only scenes worth SHOWING A USER belong here — if a scene isn't worth documenting, it isn't worth a golden. Every image under docs/screenshots/ must come from this manifest. Two kinds: still scenes (default) capture one PNG and are pixel-compared in CI; 'kind': 'recording' scenes script an interaction ('actions') and render an animated GIF — step-frames, one per action — which is DOCUMENTATION ONLY: recordings are never pixel-compared (animation diffs are flake bait; a flaky check teaches agents to regenerate goldens blindly), so they regenerate only via --update and changes are pm-reviewed like any baseline.",
+  "scene_policy": {
+    "comment": "When does a visual change warrant a NEW scene? These criteria are the architect's judgment aid — the architect cites the matching one in the spec's `visual:` declaration, and the adversary can challenge that declaration at the spec gate. That challenge is the enforcement; this block is guidance, not a machine-checked policy. An EXISTING baseline whose pixels change is always regenerated and pm-reviewed regardless.",
+    "new_scene_when": [
+      "a new user-visible state a user must recognize (a new empty/full/error/loading state, a new mode)",
+      "a new interactive affordance a user must find (a new control, button, input, or gesture)",
+      "a new page or task area in the user guide that has no illustrating image"
+    ],
+    "no_new_scene_when": [
+      "refinement of an already-documented state: spacing, color, typography, copy edits, element reordering (existing baselines that change still get regenerated + reviewed)",
+      "the change is visible only transiently or is not meaningfully capturable (announce-only, focus behavior) — declare `visual: none — <why>`"
+    ]
+  },
+  "viewport": { "width": 900, "height": 640 },
+  "scenes": [
+    {
+      "id": "empty-list",
+      "description": "First run — empty list, ready for a first todo",
+      "todos": []
+    },
+    {
+      "id": "add-and-complete",
+      "kind": "recording",
+      "description": "Adding two todos and completing one — the core interaction loop",
+      "todos": [],
+      "actions": [
+        { "do": "fill", "target": "New todo", "value": "Water the plants" },
+        { "do": "click", "target": "Add" },
+        { "do": "fill", "target": "New todo", "value": "Reply to Sam" },
+        { "do": "click", "target": "Add" },
+        { "do": "click", "target": "Toggle complete", "nth": 0 }
+      ]
+    },
+    {
+      "id": "active-and-done",
+      "description": "A working list: three items, one completed, remaining counter live",
+      "todos": [
+        { "id": "a", "text": "Buy oat milk", "completed": false },
+        { "id": "b", "text": "Write the weekly update", "completed": true },
+        { "id": "c", "text": "Water the plants", "completed": false }
+      ]
+    },
+    {
+      "id": "list-at-cap",
+      "description": "List at the 10-item cap — adding is blocked with an explanation",
+      "todos": [
+        { "id": "t1", "text": "Renew passport", "completed": true },
+        { "id": "t2", "text": "Book dentist appointment", "completed": false },
+        { "id": "t3", "text": "Fix the bike brakes", "completed": false },
+        { "id": "t4", "text": "Return library books", "completed": true },
+        { "id": "t5", "text": "Plan the offsite agenda", "completed": false },
+        { "id": "t6", "text": "Back up the laptop", "completed": false },
+        { "id": "t7", "text": "Update emergency contacts", "completed": false },
+        { "id": "t8", "text": "Descale the kettle", "completed": true },
+        { "id": "t9", "text": "File expense report", "completed": false },
+        { "id": "t10", "text": "Rotate API keys", "completed": false }
+      ]
+    },
+    {
+      "id": "undo-after-delete",
+      "description": "Just after deleting a todo — a 5-second Undo affordance appears inline",
+      "todos": [
+        { "id": "a", "text": "Buy oat milk", "completed": false },
+        { "id": "b", "text": "Write the weekly update", "completed": true },
+        { "id": "c", "text": "Water the plants", "completed": false }
+      ],
+      "action": { "type": "delete", "match": "Water the plants" }
+    },
+    {
+      "id": "due-dates",
+      "description": "Due dates — relative time-left labels, a highlighted overdue row, and the sort-by-date toggle",
+      "todos": [
+        { "id": "d1", "text": "Submit tax return", "completed": false, "dueDate": "2026-06-10" },
+        { "id": "d2", "text": "Archive old invoices", "completed": true, "dueDate": "2026-06-01" },
+        { "id": "d3", "text": "Plan the road trip", "completed": false, "dueDate": null },
+        { "id": "d4", "text": "Renew library card", "completed": false, "dueDate": "2026-06-18" }
+      ]
+    },
+    {
+      "id": "editing-todo",
+      "description": "Editing a todo — the text field, the date field, and the explicit Save/Cancel buttons",
+      "todos": [
+        { "id": "e1", "text": "Renew passport", "completed": false, "dueDate": "2026-06-20" }
+      ],
+      "action": { "type": "edit", "match": "Renew passport" }
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+name: preview-gc
+
+# ISSUE-31 (D-DEPLOY / F8 / R-GC / INV-CAP) — scheduled orphan-reconciliation sweep.
+#
+# preview-teardown.yml is best-effort: a cancelled/failed on-close run can leak a preview's
+# D1 slot, which at the ~10-database free-tier cap would eventually wedge NEW preview
+# provisioning with no automated reclaim. This sweep self-heals that: it lists every
+# `todo-preview-pr-*` D1, derives each one's PR number, asks the GitHub API for that PR's
+# state, and tears down the Worker + D1 of any PR that is closed/merged.
+#
+# The D1 databases are the authoritative list because they are the CAPPED, scarce resource
+# (there is no first-class "list Workers by prefix" CLI); each preview D1 maps 1:1 to its
+# Worker by PR number, so reclaiming the D1 and its paired Worker reclaims the whole preview.
+#
+# Idempotent and tolerant of absence; no-ops when nothing is orphaned. Additive and
+# independent: does NOT touch/reference tests.yml or sdlc-arbiter-gate.yml.
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # daily sweep
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read # query each PR's state via the GitHub API
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  preview-gc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — require the deploy secret
+        id: guard
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning title=preview-gc::CLOUDFLARE_API_TOKEN is not set; skipping sweep (no-op)."
+            echo "has_secret=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secret=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Bun
+        if: steps.guard.outputs.has_secret == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Sweep orphaned previews whose PR is closed/merged
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # List every preview D1 (the capped resource) and pull out the PR numbers.
+          PR_NUMBERS="$(bunx wrangler d1 list --json \
+            | jq -r '.[].name | select(startswith("todo-preview-pr-")) | ltrimstr("todo-preview-pr-")' \
+            | grep -E '^[0-9]+$' | sort -u || true)"
+
+          if [ -z "$PR_NUMBERS" ]; then
+            echo "No todo-preview-pr-* databases found — nothing to sweep."
+            exit 0
+          fi
+
+          for PR_N in $PR_NUMBERS; do
+            # F11 — FAIL CLOSED toward KEEPING the preview. We reclaim ONLY when the API
+            # call itself succeeds (exit 0) AND reports the PR state as definitively
+            # "closed" (GitHub's .state is open|closed; a merged PR is also "closed").
+            # ANY other outcome — non-zero exit (5xx, network blip, rate limit, token
+            # hiccup, 404 on a deleted PR), empty output, or any state other than
+            # "closed" (including "open") — keeps the preview and moves on. A transient
+            # error must never destroy an in-use preview; an unreclaimed orphan of a
+            # deleted PR is at worst a slow leak, not data loss.
+            if STATE="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_N" --jq '.state' 2>&1)"; then
+              if [ "$STATE" != "closed" ]; then
+                echo "PR #$PR_N state='$STATE' (not closed) — keeping its preview."
+                continue
+              fi
+            else
+              echo "PR #$PR_N: gh api failed (\"$STATE\") — keeping its preview (fail closed)."
+              continue
+            fi
+
+            # Only reached when the API call SUCCEEDED and state == "closed" (covers both
+            # closed-without-merge and merged) -> reclaim the orphaned resources.
+            WORKER="todo-app-pr-$PR_N"
+            DB="todo-preview-pr-$PR_N"
+            echo "PR #$PR_N is 'closed' — tearing down orphaned preview ($WORKER, $DB)."
+            bunx wrangler delete --name "$WORKER" || echo "Worker '$WORKER' already gone — ignoring."
+            bunx wrangler d1 delete "$DB" -y || echo "D1 '$DB' already gone — ignoring."
+          done

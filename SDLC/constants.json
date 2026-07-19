@@ -1,0 +1,7 @@
+{
+  "_about": "Framework-owned constants — provenance + tunables that travel WITH the framework (SDLC/), read by sdlc.py. NOT app config: the app/stack couplings live in sdlc.config.json at the repo root. A port copies this file unedited.",
+  "framework_version": "0.4.0",
+  "schema_epoch": "2026-07-05T00:00:00Z",
+  "round_cap": 4,
+  "finding_budget": 8
+}

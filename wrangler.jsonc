@@ -1,0 +1,71 @@
+{
+  // ISSUE-31 — Cloudflare Worker config (D-IAC / D-COMPUTE / D-STORE).
+  //
+  // This is infrastructure as code: `wrangler deploy` recreates the Worker and its
+  // bindings from this file alone (R-IAC). One Worker per environment serves the
+  // SPA (Static Assets) and the /api/todos API (Worker fetch) from ONE origin.
+  //
+  // NOTE: this file is used for PRODUCTION deploys only. Per-PR previews are
+  // deployed from a GENERATED wrangler.preview.jsonc (rendered by CI from
+  // wrangler.preview.template.jsonc with the PR's own D1 uuid) — never this file —
+  // so a preview can never inherit the committed production database_id (F3).
+
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "todo-app",
+  "main": "worker/index.js",
+  "compatibility_date": "2024-11-06",
+
+  // Static Assets — serve the Vite dist/ build. The block is EXACTLY as D-COMPUTE
+  // mandates (F5): run_worker_first pins the Worker fetch handler ahead of asset
+  // resolution for every /api/* request (so /api/todos always reaches Worker code,
+  // never a 200 index.html), and single-page-application gives client routes their
+  // index.html fallback for NON-/api paths only.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // D1 binding — the Production database (env.DB). Each environment binds its OWN
+  // D1; per-environment isolation is one binding to one database (INV-ISO).
+  //
+  // database_id is a PLACEHOLDER, deliberately never committed as a real value.
+  // The real uuid (from `wrangler d1 create todo-app-prod`) lives ONLY in the
+  // GitHub Actions repository variable `PRODUCTION_D1_ID` (Settings -> Secrets and
+  // variables -> Actions -> Variables). deploy-production.yml renders this file's
+  // placeholder into a git-ignored wrangler.deploy.jsonc before every remote
+  // migrate/deploy; deploy-preview.yml reads the same variable directly (not this
+  // file) for its F3 fail-closed guard. Local `wrangler dev`/`bun run dev:worker`
+  // run entirely against a LOCAL D1 emulation, which never talks to the real
+  // Cloudflare account, so the literal placeholder string here is harmless for
+  // local dev (verified empirically).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "todo-app-prod",
+      "database_id": "${PRODUCTION_D1_ID}"
+    }
+  ],
+
+  // Explicit production environment so `wrangler deploy --env production` and the
+  // top-level deploy resolve to the same Worker/bindings.
+  "env": {
+    "production": {
+      "name": "todo-app",
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "todo-app-prod",
+          "database_id": "${PRODUCTION_D1_ID}"
+        }
+      ]
+    }
+  }
+}

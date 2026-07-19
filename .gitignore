@@ -1,0 +1,33 @@
+# derived ledger state (rebuildable by re-running `gate`)
+.sdlc/ledger/gates.json
+.sdlc/ledger/audit.jsonl
+.sdlc/ledger/.build-open
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# os / editor
+.DS_Store
+*.swp
+
+# node / vite build artifacts
+node_modules/
+dist/
+.bun/
+
+# test coverage output (informational; see scripts/diff-coverage.mjs)
+coverage/
+
+# visual regression working dir (baselines live in docs/screenshots/)
+visual-diff/
+
+# sqlite data file (ISSUE-15)
+data/
+
+# cloudflare / wrangler (ISSUE-31)
+.wrangler/
+wrangler.preview.jsonc
+wrangler.deploy.jsonc

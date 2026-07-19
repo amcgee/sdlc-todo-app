@@ -1,0 +1,196 @@
+name: deploy-preview
+
+# ISSUE-31 (D-DEPLOY / D-IAC / F3 / F4) — per-PR ephemeral Preview: an ISOLATED Worker +
+# ISOLATED D1, provisioned reproducibly from committed IaC, starting EMPTY (R4/R-ISO).
+#
+# Trust boundary (INV-SECRET / R-SECRET): this uses the `pull_request` trigger, NOT
+# `pull_request_target`. GitHub therefore WITHHOLDS the secret from fork PRs, so untrusted
+# PR code never runs with the token in scope. A fork PR (secret absent) NO-OPs with a clear
+# message — it does NOT hard-fail and does NOT block unrelated CI. Same-repo SDLC PRs on
+# `claude/sdlc-issue-<n>` branches DO get the secret, so previews work for them.
+#
+# Additive and independent: does NOT touch/reference tests.yml or sdlc-arbiter-gate.yml.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# F12 — serialize runs per PR: rapid successive pushes (synchronize) must not run
+# overlapping jobs that race on D1 creation or land an older deploy after a newer one.
+# One run per PR at a time; a newer push cancels the older in-flight run.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  deployments: write # publish the preview URL as a GitHub deployment (not a repeated PR comment)
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  # The production D1 id is NOT committed (wrangler.jsonc carries only a placeholder) —
+  # the F3 fail-closed guard below reads it from this repository variable directly.
+  PRODUCTION_D1_ID: ${{ vars.PRODUCTION_D1_ID }}
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fork PRs have no secret — no-op cleanly rather than failing the check. The rest of
+      # the job is gated on has_secret so nothing downstream runs without the token.
+      - name: Guard — no-op safely when the deploy secret is absent (e.g. fork PR)
+        id: guard
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "No CLOUDFLARE_API_TOKEN in scope (likely a fork PR); skipping preview deploy (no-op)."
+            echo "has_secret=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secret=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Bun
+        if: steps.guard.outputs.has_secret == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Build the SPA (dist/)
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun run build
+
+      # Every preview name is a pure function of the PR number (reproducible from IaC alone).
+      - name: Derive per-PR names
+        id: names
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          PR_N: ${{ github.event.pull_request.number }}
+        run: |
+          echo "pr_n=$PR_N" >> "$GITHUB_OUTPUT"
+          echo "worker=todo-app-pr-$PR_N" >> "$GITHUB_OUTPUT"
+          echo "db=todo-preview-pr-$PR_N" >> "$GITHUB_OUTPUT"
+
+      # Idempotent: create the per-PR D1 only if it does not already exist (re-runs on
+      # `synchronize` must not fail on an existing DB).
+      - name: Ensure the per-PR D1 exists
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          DB: ${{ steps.names.outputs.db }}
+        run: |
+          set -euo pipefail
+          if bunx wrangler d1 info "$DB" --json >/dev/null 2>&1; then
+            echo "D1 '$DB' already exists — reusing it."
+          else
+            echo "Creating D1 '$DB'…"
+            # F12 (hardening) — tolerate a lost create race. Even with per-PR concurrency,
+            # if two creates ever overlap the loser gets "a database with that name already
+            # exists"; treat that specific error as success rather than hard-failing under
+            # `set -euo pipefail`. Any OTHER create failure still fails the step.
+            if ! CREATE_OUT="$(bunx wrangler d1 create "$DB" 2>&1)"; then
+              echo "$CREATE_OUT"
+              if echo "$CREATE_OUT" | grep -qiE "already exists"; then
+                echo "D1 '$DB' already exists (create race) — treating as success."
+              else
+                exit 1
+              fi
+            else
+              echo "$CREATE_OUT"
+            fi
+          fi
+
+      # F3 — resolve the PR's OWN D1 uuid, read the committed production id, and FAIL CLOSED
+      # if the preview id is empty or equals production. A resolution failure can NEVER
+      # silently fall back to the production database.
+      - name: Resolve the preview D1 uuid and render the preview config (fail-closed guard)
+        id: render
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          WORKER_NAME: ${{ steps.names.outputs.worker }}
+          DB_NAME: ${{ steps.names.outputs.db }}
+        run: |
+          set -euo pipefail
+          # The PR's own freshly-resolved D1 uuid.
+          DB_ID="$(bunx wrangler d1 info "$DB_NAME" --json | jq -r '.uuid')"
+          # The production id lives ONLY in the PRODUCTION_D1_ID repository variable now
+          # (wrangler.jsonc carries just the ${PRODUCTION_D1_ID} placeholder, never the
+          # real value) — read it directly rather than parsing wrangler.jsonc.
+          PROD_DB_ID="$PRODUCTION_D1_ID"
+
+          if [ -z "$DB_ID" ] || [ "$DB_ID" = "null" ]; then
+            echo "::error title=deploy-preview::Could not resolve a D1 uuid for '$DB_NAME'; refusing to deploy."
+            exit 1
+          fi
+          if [ -z "$PROD_DB_ID" ]; then
+            echo "::error title=deploy-preview::PRODUCTION_D1_ID repository variable is not set; refusing to deploy (cannot verify the F3 fail-closed guard)."
+            exit 1
+          fi
+          if [ "$DB_ID" = "$PROD_DB_ID" ]; then
+            echo "::error title=deploy-preview::Resolved preview D1 uuid equals the production id; refusing to deploy (fail-closed, F3)."
+            exit 1
+          fi
+
+          # Render wrangler.preview.jsonc from the committed template (git-ignored output).
+          # sed (not envsubst) so the render has no non-core dependency; the values are a
+          # worker name, a db name, and a D1 uuid — none contain sed-special characters.
+          sed -e "s|\${WORKER_NAME}|$WORKER_NAME|g" \
+              -e "s|\${DB_NAME}|$DB_NAME|g" \
+              -e "s|\${DB_ID}|$DB_ID|g" \
+              wrangler.preview.template.jsonc > wrangler.preview.jsonc
+          echo "Rendered wrangler.preview.jsonc for worker=$WORKER_NAME db=$DB_NAME."
+
+      # F4 — preview migrations are also a remote deploy: --remote against the PR's own D1.
+      - name: Apply D1 migrations to the remote preview database
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          DB: ${{ steps.names.outputs.db }}
+        run: bunx wrangler d1 migrations apply "$DB" --remote -c wrangler.preview.jsonc
+
+      # Deploy with -c at the generated file — never --env production.
+      - name: Deploy the preview Worker
+        id: deploy
+        if: steps.guard.outputs.has_secret == 'true'
+        run: |
+          set -euo pipefail
+          bunx wrangler deploy -c wrangler.preview.jsonc | tee deploy.out
+          URL="$(grep -oE 'https://[a-zA-Z0-9._-]+\.workers\.dev' deploy.out | head -1 || true)"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      # Publish the preview URL as a GitHub deployment instead of a PR comment. A
+      # STABLE per-PR environment (preview-pr-<n>) means each push UPDATES the same
+      # "Deployments" entry on the PR — GitHub auto-inactivates the prior deployment
+      # for that environment — so the URL never accumulates as repeated comments.
+      # transient_environment marks it ephemeral so it's retired cleanly on teardown.
+      - name: Publish the preview URL as a GitHub deployment
+        if: steps.guard.outputs.has_secret == 'true' && steps.deploy.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_N: ${{ steps.names.outputs.pr_n }}
+          URL: ${{ steps.deploy.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          ENVIRONMENT="preview-pr-$PR_N"
+
+          # Create the deployment against the PR's head commit. required_contexts:[]
+          # so it is not left "pending" waiting on checks; auto_merge:false so GitHub
+          # does not try to merge the base branch into the ref.
+          DEPLOYMENT_ID="$(jq -n \
+            --arg ref "$SHA" \
+            --arg env "$ENVIRONMENT" \
+            --arg desc "Preview deploy for PR #$PR_N" \
+            '{ref:$ref, environment:$env, auto_merge:false, required_contexts:[], transient_environment:true, description:$desc}' \
+            | gh api "repos/$GITHUB_REPOSITORY/deployments" --method POST --input - --jq '.id')"
+
+          # Mark it successful and attach the clickable preview URL (environment_url).
+          jq -n \
+            --arg url "$URL" \
+            '{state:"success", environment_url:$url, auto_inactive:true, description:"Preview deployed (isolated Worker + empty D1)"}' \
+            | gh api "repos/$GITHUB_REPOSITORY/deployments/$DEPLOYMENT_ID/statuses" --method POST --input - >/dev/null
+
+          echo "Published deployment $DEPLOYMENT_ID for $ENVIRONMENT -> $URL"

@@ -1,0 +1,44 @@
+name: cloud-contract
+
+# ISSUE-31 (D-TESTS / F1) — REQUIRED status check for the Worker/D1 runtime.
+#
+# Drives the real Worker adapter (worker/index.js) over `wrangler dev` in LOCAL mode
+# against a local D1 (SQLite under .wrangler/state) and asserts the guard/persistence
+# contract that could differ between the Bun and Worker runtimes: R3 (round-trip/order/
+# boolean), R5 (atomic swap), R-GUARD-1 (413, NOT 411), R-GUARD-2 (same-origin 403/2xx),
+# R-GUARD-3 (duplicate-id 400), R-GUARD-4 (over-length 400), R-GUARD-5 (/api never HTML).
+#
+# LOCAL mode needs NO Cloudflare secret — nothing here talks to the real account, so this
+# job runs identically for fork PRs. It is additive and independent: it does NOT touch or
+# reference tests.yml (the `bun run test` check) or sdlc-arbiter-gate.yml (the ledger gate).
+#
+# `bun run test:cloud` == `vitest run --config vitest.cloud.config.js`, which targets
+# tests/cloud/** via its own `include` (NOT a positional path the root config's `exclude`
+# would reduce to zero files) so the cloud lane actually finds and runs the tests (F1).
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies (includes wrangler devDependency)
+        run: bun install --frozen-lockfile
+
+      - name: Run the Worker/D1 cloud-contract suite (local wrangler dev, no secret)
+        run: bun run test:cloud

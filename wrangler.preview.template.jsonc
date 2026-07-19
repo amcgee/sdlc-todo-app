@@ -1,0 +1,35 @@
+{
+  // ISSUE-31 — per-PR PREVIEW Worker config TEMPLATE (D-IAC / F3).
+  //
+  // This is the fail-closed per-PR provisioning mechanism. It is a TEMPLATE, never
+  // deployed directly: CI renders it into wrangler.preview.jsonc (git-ignored) by
+  // substituting ${WORKER_NAME}, ${DB_NAME}, and ${DB_ID} with values that are a
+  // pure function of the PR number and the PR's OWN freshly-resolved D1 uuid, then
+  // deploys with `wrangler deploy -c wrangler.preview.jsonc` (never --env production).
+  //
+  // Critically there is NO hardcoded database_id here — ${DB_ID} is resolved at
+  // runtime from `wrangler d1 info todo-preview-pr-<n> --json | jq -r '.uuid'`. CI
+  // fails hard if ${DB_ID} is empty OR equals the committed production id
+  // ([ -n "$DB_ID" ] && [ "$DB_ID" != "$PROD_DB_ID" ]), so a resolution failure can
+  // NEVER silently fall back to the production database (INV-ISO).
+
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "${WORKER_NAME}",
+  "main": "worker/index.js",
+  "compatibility_date": "2024-11-06",
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "${DB_NAME}",
+      "database_id": "${DB_ID}"
+    }
+  ]
+}

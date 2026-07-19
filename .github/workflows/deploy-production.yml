@@ -1,0 +1,94 @@
+name: deploy-production
+
+# ISSUE-31 (D-DEPLOY) — Production deploy on merge/push to the default branch.
+#
+# Steps: checkout -> Bun -> install -> build dist/ -> render wrangler.jsonc's
+# ${PRODUCTION_D1_ID} placeholder into a git-ignored wrangler.deploy.jsonc using the
+# PRODUCTION_D1_ID repository variable -> apply the committed D1 migration to the REAL
+# remote Production DB -> deploy the Worker (Static Assets + D1) from that rendered
+# config. Result: https://todo-app.<subdomain>.workers.dev.
+#
+# The database_id is NOT committed to the repo (operator preference): wrangler.jsonc
+# carries only the ${PRODUCTION_D1_ID} placeholder, and the real uuid lives solely in
+# the PRODUCTION_D1_ID GitHub Actions repository VARIABLE (not a secret — a D1
+# database_id is an opaque identifier, not a credential, same as Cloudflare's own
+# guidance) — see the README's first-time setup.
+#
+# Additive and independent: does NOT touch/reference tests.yml or sdlc-arbiter-gate.yml.
+# Deploy is deliberately NOT wired as a required merge check (Q-DEPLOY-GATE) so a transient
+# Cloudflare failure cannot wedge the ledger-derived merge gate.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The Cloudflare API token is consumed ONLY by wrangler via env; it is never written to the
+# repo (N10) and never echoed. CLOUDFLARE_ACCOUNT_ID is not sensitive but wrangler needs it.
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PRODUCTION_D1_ID: ${{ vars.PRODUCTION_D1_ID }}
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail closed on EITHER missing input: an empty PRODUCTION_D1_ID would otherwise
+      # render the literal placeholder string into wrangler.deploy.jsonc and "deploy"
+      # against a nonexistent database_id — a silent, hard-to-diagnose outage, not a
+      # loud failure. Both must be present to proceed.
+      - name: Guard — require the deploy secret and the production D1 id
+        id: guard
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning title=deploy-production::CLOUDFLARE_API_TOKEN is not set; skipping deploy (no-op)."
+            echo "has_secret=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$PRODUCTION_D1_ID" ]; then
+            echo "::error title=deploy-production::PRODUCTION_D1_ID repository variable is not set; refusing to deploy (would render a placeholder database_id)."
+            exit 1
+          else
+            echo "has_secret=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Bun
+        if: steps.guard.outputs.has_secret == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Build the SPA (dist/)
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun run build
+
+      # Render wrangler.deploy.jsonc from the committed wrangler.jsonc, substituting the
+      # ${PRODUCTION_D1_ID} placeholder (both the top-level and env.production blocks, in
+      # one pass) with the real uuid from the repository variable. git-ignored output —
+      # the real id is never written back to the repo. sed (not envsubst) for consistency
+      # with the preview render and to avoid a non-core dependency.
+      - name: Render the production config
+        if: steps.guard.outputs.has_secret == 'true'
+        run: |
+          set -euo pipefail
+          sed "s|\${PRODUCTION_D1_ID}|$PRODUCTION_D1_ID|g" wrangler.jsonc > wrangler.deploy.jsonc
+          echo "Rendered wrangler.deploy.jsonc."
+
+      # F4 — CI/deploy migrations MUST pass --remote explicitly. Wrangler v4 defaults every
+      # d1 subcommand to --local, which would migrate an ephemeral local file and leave the
+      # real remote DB unmigrated (the first real PUT then fails on a missing table).
+      - name: Apply D1 migrations to the remote Production database
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bunx wrangler d1 migrations apply DB --remote -c wrangler.deploy.jsonc
+
+      - name: Deploy the Production Worker
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bunx wrangler deploy -c wrangler.deploy.jsonc

@@ -1,0 +1,51 @@
+name: security
+
+# Mechanical security layer — no agents, no tokens. Two jobs:
+#   sast: semgrep over the shipped code (dirs resolved from the manifest); ERROR-severity
+#         findings fail the check. Findings are also raw material for the adversary.
+#   deps: bun audit of the lockfile — advisory (warn-only) so a transitive CVE with no fix
+#         available doesn't wedge every PR.
+# The scan logic (which dirs, how to read semgrep's exit code) lives in SDLC/scripts/ci/
+# semgrep_floor.py so this workflow stays a thin caller. The agent-driven STRIDE pass
+# (threat-model skill) triggers separately from the driver — this is the floor, not the ceiling.
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Semgrep (ERROR severity blocks)
+        run: |
+          # Pin the major so the tool can't change under a repo with no diff. --metrics=off
+          # (inside the script) keeps a run deterministic and offline-safe.
+          pip install --quiet "semgrep>=1.50,<2"
+          python3 SDLC/scripts/ci/semgrep_floor.py
+
+  deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Dependency audit (advisory)
+        run: |
+          if [ -f package.json ]; then
+            bun install --frozen-lockfile
+            bun audit || echo "::warning title=security::bun audit reports known vulnerabilities — triage them (fix, or defer with a ledger note naming the advisory and why it can wait)"
+          else
+            echo "no package.json — nothing to audit"
+          fi

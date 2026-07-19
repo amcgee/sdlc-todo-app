@@ -1,0 +1,139 @@
+name: tests
+
+# Application test suite — this repo's own required status check, run on every PR and push to
+# the default branch. It is independent of the SDLC framework; keep it required in branch
+# protection so a merge always means the app's tests pass.
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # diff coverage compares against the PR base
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies and run tests (with coverage)
+        run: |
+          if [ -f package.json ]; then
+            bun install --frozen-lockfile
+            bun run test:coverage
+          else
+            echo "no package.json — nothing to test"
+          fi
+      - name: Diff coverage (informational — never a gate)
+        if: github.event_name == 'pull_request' && hashFiles('package.json') != ''
+        run: |
+          # Uncovered NEW lines are the adversary's priority target list and a line in
+          # the reviewer dossier. This step never fails the build: a coverage threshold
+          # as a gate only breeds vanity tests.
+          node scripts/diff-coverage.mjs "origin/${{ github.base_ref }}"
+
+      - name: Architecture dependency rules
+        run: node scripts/check-architecture.mjs
+
+      - name: Doc links resolve
+        run: node SDLC/scripts/check-doc-links.mjs
+
+      - name: Scenes, baselines, and doc embeds stay consistent
+        run: |
+          # The screenshot pipeline's contract: every scene in scenes.json has its
+          # committed baseline (PNG for stills, GIF for kind: "recording"), and every
+          # baseline is EMBEDDED in the user docs. A scene without a baseline is an
+          # unrendered promise; a baseline embedded nowhere is documentation that never
+          # reached a reader. "User docs" is the README + the multi-doc guide only (not
+          # specs/adr), and "embedded" means a real markdown image link `](…name)` — a
+          # prose mention of the filename does not count.
+          python3 - <<'EOF'
+          import json, pathlib, re, sys
+          shots = pathlib.Path("docs/screenshots")
+          if not (shots / "scenes.json").exists():
+              print("no scenes.json — nothing to check"); sys.exit(0)
+          scenes = {s["id"]: ("gif" if s.get("kind") == "recording" else "png")
+                    for s in json.loads((shots / "scenes.json").read_text())["scenes"]}
+          docs = "\n".join(p.read_text() for p in
+                           [pathlib.Path("README.md"), *pathlib.Path("docs/guide").rglob("*.md")] if p.is_file())
+          def embedded(name):
+              return re.search(r"\]\([^)]*" + re.escape(name) + r"[^)]*\)", docs) is not None
+          bad = []
+          for sid, ext in scenes.items():
+              if not (shots / f"{sid}.{ext}").is_file():
+                  bad.append(f"scene {sid!r} has no committed baseline {sid}.{ext}")
+          for img in sorted([*shots.glob("*.png"), *shots.glob("*.gif")]):
+              if scenes.get(img.stem) != img.suffix.lstrip("."):
+                  bad.append(f"{img.name} is not generated from scenes.json (every image under docs/screenshots/ must be, with the kind-matching format)")
+              elif not embedded(img.name):
+                  bad.append(f"{img.name} is embedded in no user doc (README.md or docs/guide/) — a baseline is documentation, embed it with a markdown image or remove the scene")
+          if bad:
+              print("::error title=visual-docs::scene/baseline/doc-embed consistency broken")
+              [print(" -", b) for b in bad]
+              sys.exit(1)
+          print(f"✅ {len(scenes)} scene(s): baselines committed and embedded in user docs")
+          EOF
+
+      - name: Quarantine watch (warn only)
+        run: |
+          # Skipped tests are quarantined flakes or dead weight — either way they must
+          # stay visible so the list can't grow silently. Policy: a flaky test gets ONE
+          # retry; the second flake means quarantine (skip) + an operator-approved
+          # ledger note + a follow-up issue. Never delete a test to make CI green.
+          # POSIX-portable boundary (GNU grep accepts \b in ERE, but don't depend on it)
+          SKIPS="$(grep -rEn '(^|[^A-Za-z0-9_])(it|test|describe)\.skip\(' tests/ src/ 2>/dev/null || true)"
+          if [ -n "$SKIPS" ]; then
+            COUNT="$(printf '%s\n' "$SKIPS" | wc -l | tr -d ' ')"
+            echo "::warning title=quarantine::$COUNT skipped test(s)/suite(s) — each needs a ledger note and a follow-up issue"
+            printf '%s\n' "$SKIPS" | while IFS=: read -r file line rest; do
+              echo "::warning file=$file,line=$line,title=quarantined test::$rest"
+            done
+          else
+            echo "✅ no skipped tests"
+          fi
+
+  visual:
+    # Visual regression against the docs/screenshots/ baselines (which are ALSO the
+    # images embedded in the README — stale docs and visual drift are the same failure).
+    # REPORT-ONLY for now (continue-on-error): the committed baselines were generated in
+    # a dev container, and font rendering can differ from this runner. To make this
+    # blocking: download the run's visual-diff artifact, commit its current/ captures as
+    # the new baselines (with the pm approval note), then delete continue-on-error.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies and browser
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+      - name: Capture and compare scenes
+        run: |
+          # The script's exit code must propagate: drift fails this step, and the
+          # job-level continue-on-error is what makes that a visible-but-non-blocking
+          # red. Swallowing the exit here would leave the job permanently green and
+          # the report-only state invisible.
+          PLAYWRIGHT_BROWSERS_PATH= node scripts/screenshots.mjs
+      - name: Note drift (report-only phase)
+        if: failure()
+        run: echo "::warning title=visual::scene drift vs docs/screenshots/ baselines — see the visual-diff artifact (report-only until baselines are CI-generated)"
+      - name: Upload captures and diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: visual-diff/
+          if-no-files-found: ignore
+          retention-days: 14

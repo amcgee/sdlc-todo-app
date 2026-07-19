@@ -1,0 +1,4 @@
+[submodule "vendor/agentic-sdlc"]
+	path = vendor/agentic-sdlc
+	url = https://github.com/amcgee/test-agentic-sdlc
+	branch = claude/extract-todo-app-xcjhf7

@@ -1,0 +1,22 @@
+{
+  "_about": "The project adapter manifest — the one app-specific file, at the repo root so SDLC/ ports unedited. Read only through SDLC/lib/manifest.py. See SDLC/docs/reuse.md §2.",
+
+  "shipped_paths": ["src/", "server/", "worker/", "migrations/"],
+  "trust_boundaries": ["server/", "worker/", "migrations/"],
+  "_scan_paths_note": "Additive extra dirs for the semgrep floor, on top of shipped_paths. See SDLC/docs/reuse.md §2.",
+  "scan_paths": ["scripts/"],
+
+  "toolchain": {
+    "install": "bun install",
+    "test": "bunx vitest run",
+    "coverage": "bun run test:coverage",
+    "name_flag": "-t"
+  },
+
+  "docs": {
+    "screenshots": "docs/screenshots/",
+    "architecture": "docs/architecture.md",
+    "user_guide": "docs/guide/"
+  },
+  "_docs_note": "No ui_paths/user_facing_paths by design — the visual:/docs: gate anchors on the spec declaration, not diff paths. See SDLC/docs/reuse.md §2."
+}

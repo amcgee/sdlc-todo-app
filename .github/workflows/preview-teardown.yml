@@ -1,0 +1,79 @@
+name: preview-teardown
+
+# ISSUE-31 (D-DEPLOY / R-TEARDOWN) — reclaim a PR's preview resources when it closes/merges.
+#
+# Deletes the per-PR Worker and per-PR D1 (freeing the scarce ~10-database free-tier slot,
+# D-COST). Both deletes are tolerant of "already gone" (a re-run, or a preview that never
+# deployed, must not fail). Teardown-on-close is best-effort — a cancelled/failed run is
+# caught by the scheduled sweep in preview-gc.yml (F8), so this is not the sole reclaim path.
+#
+# Additive and independent: does NOT touch/reference tests.yml or sdlc-arbiter-gate.yml.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  deployments: write # mark the PR's preview deployment inactive on close
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  preview-teardown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — no-op safely when the deploy secret is absent (e.g. fork PR)
+        id: guard
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "No CLOUDFLARE_API_TOKEN in scope (likely a fork PR); nothing was provisioned — skipping (no-op)."
+            echo "has_secret=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_secret=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Bun
+        if: steps.guard.outputs.has_secret == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        if: steps.guard.outputs.has_secret == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Tear down the PR's preview Worker and D1 (tolerant of absence)
+        if: steps.guard.outputs.has_secret == 'true'
+        env:
+          PR_N: ${{ github.event.pull_request.number }}
+        run: |
+          WORKER="todo-app-pr-$PR_N"
+          DB="todo-preview-pr-$PR_N"
+
+          echo "Deleting preview Worker '$WORKER'…"
+          bunx wrangler delete --name "$WORKER" || echo "Worker '$WORKER' already gone or never deployed — ignoring."
+
+          echo "Deleting preview D1 '$DB'…"
+          bunx wrangler d1 delete "$DB" -y || echo "D1 '$DB' already gone or never created — ignoring."
+
+      # Retire the GitHub deployment for this PR's preview environment so the PR no
+      # longer shows an "Active" preview link. Runs regardless of the Cloudflare
+      # secret (only needs GITHUB_TOKEN): a PR that never deployed has no deployments,
+      # so the loop is a clean no-op.
+      - name: Mark the preview's GitHub deployment inactive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_N: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          ENVIRONMENT="preview-pr-$PR_N"
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=$ENVIRONMENT" --jq '.[].id'); do
+            jq -n '{state:"inactive", description:"Preview torn down"}' \
+              | gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" --method POST --input - >/dev/null || true
+            echo "Marked deployment $id inactive."
+          done

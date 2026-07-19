@@ -1,0 +1,6 @@
+# The adversarial SDLC ledger is append-only: every line is a self-contained,
+# timestamped JSON record and the CLI (SDLC/sdlc.py) reconstructs state by scanning
+# the whole file, independent of line order. That makes concatenating two branches'
+# appends the correct merge — so parallel SDLC workflows merge without conflicts.
+# Combined with item-scoped finding ids, union-merged ledgers stay collision-free.
+.sdlc/ledger/rounds.jsonl merge=union

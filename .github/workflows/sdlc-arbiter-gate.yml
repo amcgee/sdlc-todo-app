@@ -1,0 +1,102 @@
+name: sdlc-arbiter-gate
+
+# Required status check: recomputes the arbiter's MERGE gate from the committed ledger and
+# fails unless the WHOLE engineering pipeline behind it is green — the spec gate is OPEN, at
+# least one adversarial round has run, and no blocker/major finding is unresolved. Paired with a
+# required human approval, the merge is double-gated.
+#
+# This workflow is a THIN ORCHESTRATOR: every check is a single call into an SDLC-owned command,
+# so the logic lives in (and is unit-tested inside) the framework, not in this YAML. A port
+# copies this file almost verbatim — the ONLY repo-specific step is "Install project runtime".
+#
+# Self-scoping: enforces only on SDLC PRs (a `claude/sdlc-issue-<n>` branch or `sdlc:*` label);
+# any other PR passes as a green no-op. The job always runs so the required check is never left
+# pending. It verifies ONLY the SDLC ledger gate — the repo's own tests are a separate check.
+
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      item:
+        description: "Work-item id (e.g. ISSUE-42)"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read   # list review threads for the solicited-review reconciliation check
+
+jobs:
+  arbiter-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history: the append-only diff and merge base need it
+
+      - name: Resolve scope (SDLC PR? which item?)
+        id: scope
+        env:
+          REF: ${{ github.head_ref || github.ref_name }}
+          LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          INPUT_ITEM: ${{ github.event.inputs.item }}
+        run: python3 SDLC/scripts/ci/resolve_scope.py
+
+      - name: Non-SDLC PR — arbiter-gate not applicable
+        if: steps.scope.outputs.is_sdlc != 'true'
+        run: echo "✅ Not an SDLC PR — arbiter-gate passes as a no-op (human approval still gates the merge)."
+
+      - name: SDLC PR is missing a resolvable work item
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item == ''
+        run: |
+          echo "::error title=arbiter-gate::SDLC PR but no work item resolved. Use a 'claude/sdlc-issue-<n>' branch, or dispatch with the item input."
+          exit 1
+
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != ''
+        with:
+          python-version: "3.x"
+
+      - name: Merge base
+        id: mb
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: echo "sha=$(git merge-base "$BASE_SHA" HEAD || echo "$BASE_SHA")" >> "$GITHUB_OUTPUT"
+
+      # ── The ONE repo-specific step ─────────────────────────────────────────────────────────
+      # Installs THIS repo's runtime so the pre-fix spot check can run its tests. A port swaps
+      # this for its runtime (e.g. astral-sh/setup-uv); python3 is already set up and everything
+      # below reads the test/install commands from the manifest. See SDLC/docs/reuse.md §3.
+      - name: Install project runtime (for the pre-fix spot check)
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request' && hashFiles('package.json') != ''
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # ───────────────────────────────────────────────────────────────────────────────────────
+
+      - name: Verify ledger gate (integrity · append-only · tests-exist · merge gate)
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != ''
+        run: python3 SDLC/sdlc.py verify-gate --item "${{ steps.scope.outputs.item }}" --base "${{ steps.mb.outputs.sha }}"
+
+      - name: Spot-check proving tests at their pre-fix commits
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request'
+        run: python3 SDLC/scripts/ci/run_spot_check.py --item "${{ steps.scope.outputs.item }}" --base "${{ steps.mb.outputs.sha }}" --max 3
+
+      - name: pm dispositions match the spec's declared impact
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request'
+        run: python3 SDLC/scripts/check-dispositions.py --item "${{ steps.scope.outputs.item }}" --base "${{ steps.mb.outputs.sha }}"
+
+      - name: Solicited review threads are reconciled
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 SDLC/scripts/check-review-threads.py --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+
+      - name: Spec economy (advisory — spec-to-code ratio, warns only)
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request'
+        run: python3 SDLC/scripts/spec-ratio.py --item "${{ steps.scope.outputs.item }}" --base "${{ steps.mb.outputs.sha }}" --warn-threshold 2.0
+
+      - name: Process-artifact lint (warn only)
+        if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != ''
+        run: python3 SDLC/scripts/ci/lint_artifacts.py

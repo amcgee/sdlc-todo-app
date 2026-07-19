@@ -1,0 +1,41 @@
+name: framework-tests
+
+# The SDLC framework's OWN test suite — pure-Python, stdlib-only, no app toolchain.
+# The framework's whole value proposition is that its record means what it says; the
+# code that enforces that (sdlc.py's append-time rules, the ledger state machine, the
+# bash write guard) must therefore be regression-tested like anything else. This runs
+# every SDLC/tests/test_*.py — the framework tests live INSIDE the framework directory,
+# separate from the app's tests/ — on every PR and push to the default branch. It is
+# app-agnostic on purpose: a repo that ports the framework keeps this workflow verbatim
+# (no bun, no node, no project layout assumed).
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  framework-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run framework test suites
+        run: |
+          # Each suite is runnable standalone (its own __main__ runner exits non-zero on
+          # failure), so no pytest dependency is required. Fail the job if any suite fails.
+          rc=0
+          for f in SDLC/tests/test_*.py; do
+            echo "=== $f ==="
+            python3 "$f" || rc=1
+          done
+          exit $rc
+      - name: Doc links resolve
+        run: node SDLC/scripts/check-doc-links.mjs
