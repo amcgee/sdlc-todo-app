@@ -6,11 +6,11 @@ architect's ~150-line budget guards against. This makes the proportion a *visibl
 the pm/arbiter and operator can manage. It is deliberately **never a gate**: a hard cap
 breeds gaming and would block a dense spec that legitimately earned its length (e.g. one
 that caught a design bug before a line of code was written). The number is a prompt to
-review the spec for duplication / implementation-transcription / design re-derivation — not
+review the spec for duplication / implementation-transcription / PRD re-derivation — not
 a target.
 
 Counts, between --base and HEAD:
-  spec+design  lines of docs/specs/<n>-*.md (the design + the spec/plan)
+  spec+PRD     lines of docs/specs/<n>-*.md (the PRD + the spec/plan)
   code         net-added lines under the manifest's `shipped_paths` (else the built-in
                default) — production code only
   tests        net-added lines under tests/ (reported for context, not in the ratio)
@@ -52,8 +52,8 @@ def _added(base: str, paths) -> int | None:
 
 
 def _spec_lines(item: str) -> tuple[int, list[str]]:
-    """Total lines of the item's design + spec docs under docs/specs/ (spec+design LOC).
-    Matches both naming conventions in the tree — `<n>-<slug>.md` / `<n>-<slug>-spec.md`
+    """Total lines of the item's PRD + spec docs under docs/specs/ (spec+PRD LOC).
+    Matches every naming convention in the tree — `<n>-<slug>[-prd].md` / `<n>-<slug>-spec.md`
     and `<ITEM>.md` / `<ITEM>-*.md` — anchored on a trailing `-` or `.md` so `ISSUE-3`
     never picks up `ISSUE-31`'s files and `9-` never matches `39-…`."""
     m = re.search(r"(\d+)$", item)
@@ -79,27 +79,27 @@ def main():
     tests = _added(a.base, ("tests/",))
 
     if not files:
-        print(f"spec economy [{a.item}]: no design/spec docs under docs/specs/ for {a.item} "
+        print(f"spec economy [{a.item}]: no PRD/spec docs under docs/specs/ for {a.item} "
               f"(looked for '<n>-*.md' and '{a.item}*.md') — nothing to measure.")
         print("ratio=n/a")
         return 0
     if not code or code <= 0:
-        print(f"spec economy [{a.item}]: spec+design {spec} lines"
+        print(f"spec economy [{a.item}]: spec+PRD {spec} lines"
               f" ({', '.join(files)}); code delta unavailable vs {a.base} — ratio not computed.")
         print("ratio=n/a")
         return 0
 
     ratio = spec / code
     tail = f"  · tests +{tests}" if tests and tests > 0 else ""
-    print(f"spec economy [{a.item}]: spec+design {spec} lines / code +{code} (net) "
+    print(f"spec economy [{a.item}]: spec+PRD {spec} lines / code +{code} (net) "
           f"= {ratio:.1f}:1{tail}")
     print(f"  ({', '.join(files)}; architect budget ~150 spec lines. Advisory — a high "
           f"ratio prompts a spec review for duplication / implementation-transcription / "
-          f"design re-derivation, never a gate.)")
+          f"PRD re-derivation, never a gate.)")
     print(f"ratio={ratio:.1f}")
     if a.warn_threshold is not None and ratio >= a.warn_threshold:
         print(f"::warning title=spec economy::spec-to-code ratio is {ratio:.1f}:1 for {a.item} — "
-              f"review the spec for duplication / implementation-transcription / design "
+              f"review the spec for duplication / implementation-transcription / PRD "
               f"re-derivation (advisory, never blocks)")
     return 0
 

@@ -26,7 +26,7 @@ python SDLC/sdlc.py defer --ref <ITEM>-F<n> --by defender \
 ```
 
 Deferred findings never held the gate anyway; deferring keeps the merge diff at the size
-the design intended. (The CLI refuses to defer a blocker/major.)
+the PRD intended. (The CLI refuses to defer a blocker/major.)
 
 **REBUT** — the finding is invalid, already mitigated elsewhere, or genuinely
 out-of-scope per the ratified spec. File a rebuttal that an impartial arbiter would

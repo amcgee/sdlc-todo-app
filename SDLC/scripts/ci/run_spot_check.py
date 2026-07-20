@@ -9,7 +9,7 @@ The project runtime (bun, uv, …) must already be on PATH — that install is t
 stack-specific workflow step; everything here reads the manifest.
 """
 from __future__ import annotations
-import argparse, subprocess, sys
+import argparse, shlex, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,10 +31,12 @@ def main():
     if not TOOLCHAIN.get("test"):
         print("no toolchain.test in sdlc.config.json — nothing to spot-check; skipping")
         return
-    install = TOOLCHAIN.get("install")
-    if install:
-        print(f"installing deps: {install}")
-        subprocess.run(install, shell=True, cwd=ROOT, check=False)
+    # No shell: the manifest's install is one argv, same contract spot_check.py
+    # enforces on toolchain commands via shlex.split.
+    argv = shlex.split(TOOLCHAIN.get("install") or "")
+    if argv:
+        print(f"installing deps: {' '.join(argv)}")
+        subprocess.run(argv, cwd=ROOT, check=False)
     base = subprocess.run(["git", "merge-base", a.base, "HEAD"], capture_output=True, text=True).stdout.strip() \
         if a.base else ""
     cmd = [sys.executable, str(ROOT / "SDLC" / "lib" / "spot_check.py"), "--item", a.item, "--max", a.max]

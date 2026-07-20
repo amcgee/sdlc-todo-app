@@ -21,7 +21,7 @@ Usage:
                   --pre-sha abc123 --post-sha def456 --msg "fails at pre-sha, passes at post-sha; suite green"
   sdlc.py verdict --ref AUTH-1-F3 --by arbiter --ruling accepted   # only for REBUTTED findings; accepted=finding valid | rejected=rebuttal wins
   sdlc.py round   --item AUTH-1 --by adversary               # mark the start of an attack round (drives the round cap)
-  sdlc.py note    --item AUTH-1 --by pm --msg "design conformance: clean"
+  sdlc.py note    --item AUTH-1 --by pm --msg "PRD conformance: clean"
   sdlc.py gate    --item AUTH-1 --phase merge                # computes pass/fail from the ledger
   sdlc.py status  --item AUTH-1
   sdlc.py metrics --item AUTH-1                              # outcome & cost scorecard (omit --item for all)
@@ -154,7 +154,7 @@ SCHEMA_EPOCH = _CONST.get("schema_epoch", "2026-07-05T00:00:00Z")
 # shut until the spec (technical spec + plan) is ratified, the build is recorded,
 # and at least one adversarial round has run — not just until the findings raised
 # so far are resolved.
-# (The product/design phase is human-only, runs on the issue, and never touches this ledger.)
+# (The product workflow — the PRD — is human-only, runs on the issue, and never touches this ledger.)
 PREREQ_GATES = {"build": ("spec",), "merge": ("spec", "build")}
 ROUNDS_REQUIRED = {"merge": 1}          # phases that require >=N recorded rounds
 
@@ -180,7 +180,8 @@ def _fmt_dur(secs: int) -> str:
     return f"{h}h{m:02d}m"
 
 
-# Reportable phases (the driver's PRODUCT is human-only and never touches the ledger).
+# Reportable phases (the product workflow is human-only, lives on the issue, and never
+# touches the ledger).
 # Each: (label, start-anchor, end-gate). Timing reports each completed phase's active
 # span (anchor → gate) minus operator wait; per-role sub-attribution was dropped — it
 # rested on fragile gap heuristics and served only a vanity table.
@@ -259,11 +260,11 @@ def _next_finding_id(entries: list[dict], item: str) -> str:
 # ---- commands ---------------------------------------------------------------
 
 SIZES = ("trivial", "standard", "epic")
-# Size drives the DRIVER's path, not the gate math: trivial skips PRODUCT and uses a
-# mini-spec (one human checkpoint, one diff-scoped round); standard is the full cycle;
-# epic must be split into child issues before engineering starts (an epic never builds
-# directly). The ledger state machine is identical for all three — size is recorded so
-# the path taken is auditable and `metrics` can compare cost by size.
+# Size drives the workflows' path, not the gate math: trivial skips the PRD iteration
+# and uses a mini-spec (one human checkpoint, one diff-scoped round); standard is the
+# full cycle; epic must be split into child issues before engineering starts (an epic
+# never builds directly). The ledger state machine is identical for all three — size is
+# recorded so the path taken is auditable and `metrics` can compare cost by size.
 
 
 def cmd_open(a):
@@ -387,7 +388,7 @@ def cmd_version(a):
 
 def cmd_note(a):
     """A recorded observation tied to an item — e.g. the pm's mandatory
-    design-conformance result ('clean' or a pointer at the findings it filed)."""
+    PRD-conformance result ('clean' or a pointer at the findings it filed)."""
     _append({"type": "note", "item": a.item, "by": a.by, "msg": a.msg})
     print(f"noted on {a.item} by {a.by}: {a.msg}")
 
