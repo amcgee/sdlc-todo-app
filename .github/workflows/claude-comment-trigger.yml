@@ -1,0 +1,59 @@
+name: claude-comment-trigger
+
+# EXPERIMENTAL — proving out an alternate trigger for the PRODUCT workflow's comment-driven
+# iterations. The SDLC Routine's own `issue_comment` delivery has been observed NOT firing
+# reliably (a label add on the same issue fires it fine), so this workflow converts an
+# authorized `@claude` comment into a `labeled` event instead — an event family we've already
+# confirmed the Routine wakes on. No code checkout needed; this only calls the Issues API.
+#
+# Mechanism: remove-then-add the `claude-ping` label (creating it on first use). Doing a
+# remove-then-add on every firing — rather than a plain add — guarantees a fresh `labeled`
+# webhook event every time, even if a previous ping is still attached because nothing has
+# removed it yet (the driver doesn't consume this label at all yet — this workflow alone is
+# the experiment; teaching sdlc-product.md/sdlc.md to handle + clear the label is a follow-up
+# once this proves the wake-up actually happens).
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    # Real issues only (issue_comment also fires for PR conversation comments — those are
+    # ENGINEERING's territory and already covered by subscribe_pr_activity), an authorized
+    # collaborator (mirrors the driver's own §0 authorization check), not a bot, and the
+    # comment must begin with `@claude`.
+    if: >
+      github.event.issue.pull_request == null &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+      startsWith(github.event.comment.body, '@claude')
+    steps:
+      - name: Toggle claude-ping to force a fresh labeled event
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'claude-ping';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              await github.rest.issues.createLabel({
+                owner, repo, name: label, color: 'd93f0b',
+                description: 'Internal: pings the SDLC routine on an @claude comment (experimental trigger)',
+              });
+            }
+
+            try {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label });
+            } catch (e) {
+              if (e.status !== 404) throw e; // wasn't present — fine, we're about to add it
+            }
+            await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] });
