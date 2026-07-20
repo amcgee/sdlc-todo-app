@@ -80,10 +80,16 @@ list of **open questions**.
   ```
 
 - **Comment on the issue** with a short prose summary of what changed and the open questions
-  as a list. End verbatim: *To approve the PRD and start engineering, comment `@claude
-  continue`. To refine it, comment `@claude <your changes>`.*
+  as a list. **If the design tail is about to run this iteration** (§3b decides — entering
+  design mode now, or continuing it), say so **before** the closing line: *"Mockups for this
+  revision are being drawn now — a follow-up comment with screenshots will land shortly."*
+  Approving before that comment lands is still safe (ratification catches up any lag, §4),
+  but an operator who hasn't seen mockups yet for a design-impact feature should be told one
+  is coming, not just invited to approve blind. End verbatim: *To approve the PRD and start
+  engineering, comment `@claude continue`. To refine it, comment `@claude <your changes>`.*
 - **Design tail (only when the design facet is active, §3b):** after the comment is posted,
-  run the tail — the operator never waits on pixels to read the prose.
+  run the tail — the operator never waits on pixels to read the prose, but the prose already
+  told them pixels are coming.
 - **End the session.** The operator's next comment fires the next iteration.
 
 ## 3b. The design facet (`Design-impact: yes` only)
@@ -98,7 +104,10 @@ rendering is the builder's.
 thrown away wholesale and a picture magnetizes feedback to button placement prematurely.
 Bring the `designer` in when the feedback shifts from scope ("should this exist?") to
 behavior and appearance ("how should it work?"), or when the operator asks to see it. From
-then on, every iteration runs the design tail.
+then on, every iteration runs the design tail — **and every one of those iterations' §3
+comment says so before its closing CTA** (the iteration that first crosses this threshold
+included). Silence on this point reads as "nothing else is coming, decide now" — exactly
+backwards for a feature the operator is meant to see before approving.
 
 **The async tail — prose first, pixels after.** Each iteration posts the §3 prose comment
 immediately, then in the same session:
