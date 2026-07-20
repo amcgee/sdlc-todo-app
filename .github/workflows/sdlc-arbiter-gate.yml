@@ -64,10 +64,12 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: echo "sha=$(git merge-base "$BASE_SHA" HEAD || echo "$BASE_SHA")" >> "$GITHUB_OUTPUT"
 
-      # ── The ONE repo-specific step ─────────────────────────────────────────────────────────
-      # Installs THIS repo's runtime so the pre-fix spot check can run its tests. A port swaps
-      # this for its runtime (e.g. astral-sh/setup-uv); python3 is already set up and everything
-      # below reads the test/install commands from the manifest. See SDLC/docs/reuse.md §3.
+      # ── The ONE stack-specific step ────────────────────────────────────────────────────────
+      # Installs the project runtime so the pre-fix spot check can run the manifest's test
+      # command. Ships covering the common JS consumer (Bun, skipped when there is no
+      # package.json); a port on another stack swaps it for its runtime (e.g.
+      # astral-sh/setup-uv) — python3 is always present, and everything below reads the
+      # test/install commands from the manifest. See SDLC/docs/reuse.md §3.
       - name: Install project runtime (for the pre-fix spot check)
         if: steps.scope.outputs.is_sdlc == 'true' && steps.scope.outputs.item != '' && github.event_name == 'pull_request' && hashFiles('package.json') != ''
         uses: oven-sh/setup-bun@v2

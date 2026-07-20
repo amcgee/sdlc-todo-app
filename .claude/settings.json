@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/package.json\" ]; then if command -v bun >/dev/null 2>&1; then cd \"$CLAUDE_PROJECT_DIR\" && bun install; else echo \"ERROR: bun not found on PATH; install Bun (https://bun.sh) — it is a session prerequisite for this repo.\" >&2; exit 1; fi; fi"
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/package.json\" ]; then if command -v bun >/dev/null 2>&1; then cd \"$CLAUDE_PROJECT_DIR\" && bun install; else echo \"ERROR: bun not found on PATH; install Bun (https://bun.sh) \u2014 it is a session prerequisite for this repo.\" >&2; exit 1; fi; fi"
           }
         ]
       }
@@ -54,6 +54,10 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/git_branch_guard.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash_write_guard.py\""
           }
         ]
       }

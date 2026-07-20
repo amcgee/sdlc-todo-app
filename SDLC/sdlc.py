@@ -191,14 +191,26 @@ TIMING_PHASES = (
 )
 
 
+MALFORMED: list[str] = []       # unparseable ledger lines from the last _read(), for doctor
+
+
 def _read() -> list[dict]:
+    """Parseable ledger entries. A line that isn't valid JSON (a mangled hand-merge, a
+    stray conflict marker) is collected in MALFORMED instead of crashing the CLI, so every
+    command still runs on the healthy entries and `doctor` reports each bad line as a
+    FATAL integrity problem — a diagnosis, not a traceback."""
     if not LEDGER.exists():
         return []
+    MALFORMED.clear()
     out = []
-    for line in LEDGER.read_text().splitlines():
+    for n, line in enumerate(LEDGER.read_text().splitlines(), 1):
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             out.append(json.loads(line))
+        except json.JSONDecodeError:
+            MALFORMED.append(f"line {n}: {line[:60]!r}")
     return out
 
 
@@ -683,6 +695,9 @@ def cmd_doctor(a):
     mint, so its presence means the ledger was written around the CLI. See SCHEMA_EPOCH."""
     entries = _read()
     problems = []
+
+    for bad in MALFORMED:
+        problems.append(f"unparseable ledger {bad} — not JSON (mangled merge or hand edit)")
 
     seen: dict[str, list[str]] = {}
     for e in entries:

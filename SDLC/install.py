@@ -40,7 +40,8 @@ MANIFEST = "sdlc.config.json"
 # The three framework workflows (thin orchestrators). App workflows are NOT copied.
 FRAMEWORK_WORKFLOWS = ("framework-tests.yml", "security.yml", "sdlc-arbiter-gate.yml")
 
-# The `.claude/` wiring the framework needs. `launch.json` is app-specific and skipped.
+# The `.claude/` wiring the framework needs; only these subdirectories are copied, so any
+# app-specific files a target keeps in its own `.claude/` are untouched.
 CLAUDE_WIRING = ("agents", "skills", "commands", "hooks")
 
 # The mutable ledger lives OUTSIDE SDLC/ (default here) so the framework directory is fully
@@ -190,23 +191,34 @@ def merge_settings(existing: dict, source: dict) -> dict:
     for key, val in source.get("env", {}).items():
         env.setdefault(key, val)
 
-    # Hooks: only add framework hook groups whose command isn't already wired.
-    def command_of(group: dict) -> str:
-        try:
-            return group["hooks"][0].get("command", "")
-        except (KeyError, IndexError, AttributeError):
-            return ""
+    # Hooks: merged per matcher-group, then per individual hook, so an upgrade can ADD a
+    # framework hook to a group the target already has (e.g. a new guard joining the Bash
+    # matcher) without ever duplicating one that is wired. Each hook is identified by a
+    # SLOT — the framework guards by filename, and the session-install hook by either its
+    # manifest-driven form or a hand-edited legacy install command — so functionally
+    # equivalent variants collide instead of stacking.
+    def _slot(cmd: str) -> str:
+        for m in ("gate_guard.py", "git_branch_guard.py", "bash_write_guard.py"):
+            if m in cmd:
+                return m
+        if "manifest.toolchain" in cmd or "install" in cmd:
+            return "session-install"
+        return cmd
 
     hooks = merged.setdefault("hooks", {})
     for event, groups in source.get("hooks", {}).items():
-        existing_cmds = [command_of(g) for g in hooks.get(event, [])]
-        markers = ("gate_guard.py", "git_branch_guard.py", "bash_write_guard.py", "bun install")
+        existing_groups = hooks.setdefault(event, [])
         for group in groups:
-            cmd = command_of(group)
-            fingerprint = next((m for m in markers if m in cmd), cmd)
-            if not any(fingerprint in ec for ec in existing_cmds):
-                hooks.setdefault(event, []).append(group)
-                existing_cmds.append(cmd)
+            matcher = group.get("matcher")
+            target = next((g for g in existing_groups if g.get("matcher") == matcher), None)
+            if target is None:
+                existing_groups.append(json.loads(json.dumps(group)))
+                continue
+            wired = {_slot(h.get("command", "")) for g in existing_groups
+                     for h in g.get("hooks", [])}
+            for hook in group.get("hooks", []):
+                if _slot(hook.get("command", "")) not in wired:
+                    target.setdefault("hooks", []).append(dict(hook))
     return merged
 
 
@@ -395,8 +407,8 @@ def next_steps(dst_root: Path) -> None:
     print(
         "\nNext steps:\n"
         f"  1. Edit {dst_root / MANIFEST} for your stack (shipped_paths, toolchain, trust_boundaries).\n"
-        "  2. Adjust the SessionStart install hook in .claude/settings.json to your setup command,\n"
-        "     and the 'Install project runtime' step in .github/workflows/sdlc-arbiter-gate.yml.\n"
+        "  2. The SessionStart hook runs the manifest's toolchain.install automatically; on a\n"
+        "     non-JS stack also swap the 'Install project runtime' step in sdlc-arbiter-gate.yml.\n"
         "  3. Reimplement or drop the app adapters (see SDLC/docs/reuse.md §3).\n"
         "  4. Set up the GitHub routine and branch protection — SDLC/docs/SETUP.md.\n"
         "  5. Verify:  python3 SDLC/sdlc.py doctor --exit-code  &&  python3 SDLC/tests/test_ledger.py\n"

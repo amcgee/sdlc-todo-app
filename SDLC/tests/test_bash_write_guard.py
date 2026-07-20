@@ -96,6 +96,18 @@ def test_unparseable_segment_fails_open():
     _allowed("echo 'unterminated")
 
 
+def test_guard_is_wired_in_settings():
+    """The guard only protects anything if settings.json actually runs it on the Bash
+    matcher — a correct guard that isn't wired is dead code, which this pins."""
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text())
+    bash_cmds = [h.get("command", "")
+                 for g in settings.get("hooks", {}).get("PreToolUse", [])
+                 if "Bash" in (g.get("matcher") or "")
+                 for h in g.get("hooks", [])]
+    assert any("bash_write_guard.py" in c for c in bash_cmds), \
+        f"bash_write_guard.py is not wired on the Bash matcher: {bash_cmds}"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

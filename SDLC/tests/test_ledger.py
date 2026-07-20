@@ -109,6 +109,20 @@ def test_doctor_detects_same_item_collision():
         assert "duplicate finding id X-F1" in r.stdout
 
 
+def test_doctor_reports_malformed_line_as_problem():
+    """A non-JSON ledger line (mangled merge, stray conflict marker) must surface as a
+    fatal doctor problem — a diagnosis, never an unhandled traceback."""
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_sandbox(Path(d))
+        _sdlc(repo, "open", "--item", "IT-1", "--title", "t")
+        with sandbox.rounds(repo).open("a") as f:
+            f.write("<<<<<<< not json\n")
+        r = _sdlc(repo, "doctor", "--exit-code", check=False)
+        assert r.returncode == 1, f"doctor must fail on a malformed line:\n{r.stdout}\n{r.stderr}"
+        assert "unparseable" in r.stdout, r.stdout
+        assert "Traceback" not in r.stderr, r.stderr
+
+
 def test_doctor_detects_dangling_ref():
     """A ref to a finding that isn't present (dropped by a bad merge) is flagged."""
     with tempfile.TemporaryDirectory() as d:

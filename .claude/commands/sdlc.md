@@ -356,8 +356,10 @@ test on the fast path); a revert is always trivial — and label it `sdlc` so a 
 - **Spec is the only human stop inside engineering.** After `@claude continue` ratifies it,
   build → test → merge run straight through in this session. Claude marks the PR ready but **never merges**
   — a human merges (needs their approval **and** a green arbiter-gate).
-- **Protected directories — do not modify `.github/`, `.claude/`, or `SDLC/` while running the cycle.**
-  Cycle work writes the design (issue/PR body + `docs/specs/`), source (`src/`), and tests only; the
-  ledger is updated solely through `SDLC/sdlc.py`. If a step genuinely needs a change to one of these,
+- **Protected directories — do not modify `.github/`, `.claude/`, or `SDLC/` while running the cycle**
+  (unless a manifest `shipped_paths` entry names one of them as the product under development —
+  then the build gate governs it like any shipped code). Cycle work writes the design (issue/PR
+  body + `docs/specs/`), the manifest's `shipped_paths`, and tests only; the ledger is updated
+  solely through `SDLC/sdlc.py`. If a step genuinely needs a change to one of these,
   **stop**, comment on the PR with the exact file(s) and reason, and wait for the operator to make it a
   deliberate, approved change — never a silent self-rewrite.

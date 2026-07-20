@@ -98,10 +98,12 @@ reader `SDLC/lib/manifest.py`, so the resolution logic never drifts between them
   purpose — that is what keeps the framework directory immutable. If you relocate it, update
   the `.gitattributes` union-merge line to match.
 
-Also adjust the `SessionStart` install hook in `.claude/settings.json` (`bun install`) to
-your setup command, and the one **project-runtime** step in `sdlc-arbiter-gate.yml` (Install
-Bun) to your language's runtime — `python3` is already set up, and everything else reads the
-manifest, so that's the only stack-specific line in the workflow.
+The `SessionStart` hook in `.claude/settings.json` runs the manifest's `toolchain.install`
+command automatically — set that key and no hook edit is needed. The one **project-runtime**
+step in `sdlc-arbiter-gate.yml` ships covering the common JS consumer (Bun, skipped without
+a `package.json`); on another stack swap it for your runtime — `python3` is always present,
+and everything else reads the manifest, so that's the only stack-specific line in the
+workflow.
 
 ## 3. Reimplement or drop the adapters
 

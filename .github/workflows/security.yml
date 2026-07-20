@@ -35,10 +35,13 @@ jobs:
           python3 SDLC/scripts/ci/semgrep_floor.py
 
   deps:
+    # Dependency audit for JS-toolchain consumers; a repo with no package.json (like the
+    # framework repo itself) skips the runtime install and no-ops.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        if: hashFiles('package.json') != ''
         with:
           bun-version: latest
       - name: Dependency audit (advisory)
