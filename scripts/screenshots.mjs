@@ -115,6 +115,7 @@ async function act(page, a) {
   else if (a.do === 'click') await loc.click();
   else if (a.do === 'dblclick') await loc.dblclick();
   else if (a.do === 'press') await loc.press(a.value ?? 'Enter');
+  else if (a.do === 'focus') await loc.focus(); // reveal a focus-only affordance (e.g. the drag handle) before a keyed move
   else throw new Error(`unknown recording action: ${a.do}`);
   await page.waitForTimeout(120); // let the UI commit before the frame
 }

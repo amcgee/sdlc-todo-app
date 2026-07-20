@@ -122,6 +122,64 @@ export function restoreTodos(list, entries) {
 }
 
 /**
+ * Relocate the todo whose `id` matches to `toIndex`, its final 0-based resting index
+ * (remove-then-insert: the item is spliced out, then inserted so it lands at `toIndex`
+ * in the resulting array). `toIndex` is clamped to `[0, length-1]`. Returns the SAME
+ * list reference (no-op) when `id` is absent or the clamped destination equals the
+ * item's current index, so a move that changes nothing issues no redundant save.
+ * Never mutates its input; a real move returns a new array that is a pure permutation
+ * of the old one (same length, same id multiset, no field edited).
+ * @param {Array} list
+ * @param {string} id
+ * @param {number} toIndex  final resting index (clamped)
+ * @returns {Array}
+ */
+export function moveTodo(list, id, toIndex) {
+  const from = list.findIndex((t) => t.id === id);
+  if (from === -1) return list; // absent -> no-op, same ref
+  const clamped = Math.max(0, Math.min(toIndex, list.length - 1));
+  if (clamped === from) return list; // lands where it already is -> no-op, same ref
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(clamped, 0, item);
+  return next;
+}
+
+/**
+ * Pure pointer-geometry mapping for a drag (R4). Given each rendered row's vertical
+ * band (`rowRects[k] = { top, bottom }`, in rendered order), the pointer's Y, and the
+ * dragged item's origin index `i`, returns `{ gap, toIndex }`:
+ *   - `gap` (0..N) is the prospective slot the item would land in among the rendered
+ *     rows: `gap = r` when the pointer is in row `r`'s upper half, `gap = r + 1` in its
+ *     lower half (a pointer above the list clamps to gap 0, below it to gap N).
+ *   - `toIndex` is the destination for `moveTodo`, adjusted for the item's own removal:
+ *     `toIndex = gap` when `gap <= i`, else `gap - 1`. This agrees with `moveTodo`'s
+ *     post-removal semantics in both drag directions.
+ * Reads no layout itself (rects are passed in) so the mapping is unit-testable.
+ * @param {Array<{top: number, bottom: number}>} rowRects
+ * @param {number} pointerY
+ * @param {number} originIndex
+ * @returns {{gap: number, toIndex: number}}
+ */
+export function pointerDropIndex(rowRects, pointerY, originIndex) {
+  const n = rowRects.length;
+  if (n === 0) return { gap: 0, toIndex: originIndex };
+  // The row band under the pointer, clamped to the ends: the first row whose bottom
+  // edge is below the pointer, else the last row when the pointer is past the list.
+  let r = n - 1;
+  for (let k = 0; k < n; k++) {
+    if (pointerY < rowRects[k].bottom) {
+      r = k;
+      break;
+    }
+  }
+  const { top, bottom } = rowRects[r];
+  const gap = pointerY < (top + bottom) / 2 ? r : r + 1;
+  const toIndex = gap <= originIndex ? gap : gap - 1;
+  return { gap, toIndex };
+}
+
+/**
  * R8 — Select todos by status. "active" -> not completed; "completed" -> completed;
  * any other value (including "all") -> all (defensive default). Order preserved.
  * @param {Array} list

@@ -84,6 +84,20 @@
         { "id": "e1", "text": "Renew passport", "completed": false, "dueDate": "2026-06-20" }
       ],
       "action": { "type": "edit", "match": "Renew passport" }
+    },
+    {
+      "id": "reordering",
+      "kind": "recording",
+      "description": "Reordering a todo — focusing the drag handle reveals it and the keyboard hint, then ArrowDown moves the item one position with a live announcement",
+      "todos": [
+        { "id": "r1", "text": "Water the plants", "completed": false },
+        { "id": "r2", "text": "Reply to Sam", "completed": false },
+        { "id": "r3", "text": "Book the flights", "completed": false }
+      ],
+      "actions": [
+        { "do": "focus", "target": "Reorder Water the plants" },
+        { "do": "press", "target": "Reorder Water the plants", "value": "ArrowDown" }
+      ]
     }
   ]
 }
