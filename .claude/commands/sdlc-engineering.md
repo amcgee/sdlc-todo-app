@@ -143,11 +143,10 @@ conventional-commit label for the branch.
 - `sdlc.py open --item ISSUE-<n> --title "<issue title>" --size <size>`, then **snapshot the
   ratified PRD** from the issue body into the **PRD file** (naming below) — the PRD text only, minus
   the collapsed original-request block. On a **trivial** item the issue text is the PRD; snapshot it
-  verbatim. **From this moment the PRD file is the single canonical copy**: rewrite the issue body to
-  a one-paragraph summary + a link to the file (+ the collapsed original request), and give the PR
-  body's `## PRD` section the same summary + link. Full-text mirrors drift — every reader and every
-  agent gets the PRD from the file, and PRD changes (rare, operator-approved) are edits to the file,
-  committed like any other artifact.
+  verbatim. **The PRD file is what every other agent references by path** (architect, builder, pm).
+  Leave the issue body alone — it already holds the ratified PRD verbatim, and nothing edits it
+  again until the final outcome comment (§7). Give the PR body's `## PRD` section a one-paragraph
+  summary + a link to the file.
 - Checkpoint (§6), then fall through to §3.
 
 **Spec file naming — descriptive, not opaque.** Name the two spec files with a short human-readable
