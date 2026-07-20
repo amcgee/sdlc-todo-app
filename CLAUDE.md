@@ -27,3 +27,11 @@ The one app-specific file is **`sdlc.config.json`** at the repo root — edit it
 | Set up the GitHub routine | [SDLC/docs/SETUP.md](SDLC/docs/SETUP.md) |
 | Tune framework constants | `SDLC/constants.json` (app/stack couplings: `sdlc.config.json` at the repo root) |
 <!-- SDLC:END operator guide -->
+
+## Project-specific rules
+
+- **Never merge a PR to `main` — in this repo or any other — merging is a human-only action.**
+  Push branches, open PRs, keep their descriptions current, and report when CI is green; stop
+  there. This holds even when asked to "check CI and merge if green" — verify and report the
+  result, don't click merge. (Kept outside the SDLC-managed block above so `install.py --force`
+  never touches it.)
