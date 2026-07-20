@@ -29,7 +29,9 @@ or ordering concept; the stored array order *is* the order.
 
 - **R1.** `moveTodo(list, id, toIndex)` returns a new array with the item relocated to the clamped
   destination; a non-matching id, or a destination equal to the current index, returns the **same
-  list reference** (no-op, so no redundant `PUT`); input never mutated. Falsify (`tests/todos.test.js`)
+  list reference** (no-op, so no redundant `PUT`); input never mutated. `toIndex` is the item's
+  **final** 0-based resting index (remove-then-insert semantics: the item is spliced out, then
+  inserted so it lands at `toIndex` in the resulting array). Falsify (`tests/todos.test.js`)
   via the oracle table below, plus: unknown id → same ref; no-op move → same ref; original array
   unmodified.
 - **R2.** Reordering is offered **only** in a reorderable context. Elsewhere the handle still renders
@@ -40,30 +42,53 @@ or ordering concept; the stored array order *is* the order.
   no `PUT` fires.
 - **R3.** With a handle focused, `ArrowUp`/`ArrowDown` moves the item one stored position immediately
   (no pick-up mode) and focus stays on that same handle at its new position; at an end the key is a
-  no-op. Falsify (`tests/App.reorder.test.jsx`): ArrowDown on the 2nd of 3 items reorders the DOM and
-  `document.activeElement` is still that handle; ArrowUp on the first item leaves order unchanged and
-  fires no `PUT`.
-- **R4.** A pointer drag from the handle shows a drop-target indicator at the prospective gap and, on
-  release, commits `moveTodo` to the indicated index; a release back at the origin gap commits
-  nothing. Falsify (`tests/App.reorder.test.jsx`, row `getBoundingClientRect` stubbed to synthetic
-  vertical bands): pointerdown-on-handle → pointermove into row *k*'s band renders the indicator and,
-  on pointerup, issues exactly one `PUT` with the item at *k*; a pointerup over the origin band issues
-  zero `PUT`.
+  no-op. While a handle is focused in a reorderable context, a hint **"Press ↑ / ↓ to move"** is
+  shown and programmatically associated with the handle (`aria-describedby`); it is absent when the
+  handle is unfocused, and in a non-reorderable context the R2 disabled-tooltip is shown instead of
+  the hint. Falsify (`tests/App.reorder.test.jsx`): ArrowDown on the 2nd of 3 items reorders the DOM
+  and `document.activeElement` is still that handle; ArrowUp on the first item leaves order unchanged
+  and fires no `PUT`; focusing an enabled handle exposes the hint text and blurring removes it.
+- **R4.** A pointer drag from the handle lifts the row and, until release, renders three elements
+  together: (1) the dragged row in a **lifted** presentation, (2) a distinct **drop-target
+  indicator** at the prospective gap, and (3) a **dashed source-gap placeholder** in the slot the
+  row left. The prospective gap maps to `moveTodo`'s destination by pointer geometry: for the row
+  under the pointer at rendered index `r` (dragged item's origin index `i`), the target gap is
+  `g = r` when the pointer is in that row's **upper** half and `g = r + 1` in its **lower** half;
+  then `toIndex = g` when `g ≤ i`, else `toIndex = g − 1`. This one rule agrees with `moveTodo`'s
+  post-removal semantics in **both** drag directions. On release it commits exactly one
+  `moveTodo(list, id, toIndex)`; a release whose `toIndex` equals `i` (either half of the origin
+  row) commits nothing. Falsify (`tests/App.reorder.test.jsx`, row `getBoundingClientRect` stubbed
+  to synthetic vertical bands): mid-drag exactly one lifted-row, one drop-indicator, and one
+  source-placeholder marker are present and all vanish on pointerup; and each drag-oracle row below
+  issues exactly one `PUT` placing the item at the stated index (zero `PUT` for the origin case).
 - **R5.** Every completed move announces `"<text> moved to position N of M."` (N = 1-based stored
   position, M = list length) in the app's existing `role="status" aria-live="polite"` region; an
-  end-of-list no-op announces `"<text> is already at the top."` / `"…at the bottom."`. Falsify
-  (`tests/App.reorder.test.jsx`): the status region's text after a keyboard move equals the position
-  copy; after an end no-op equals the top/bottom copy.
+  end-of-list no-op announces `"<text> is already at the top."` / `"…at the bottom."`. The move
+  announcement and the region's `notice`/undo-label content are **mutually exclusive**: setting the
+  announcement clears `notice` and finalizes any pending undo, and any later action that writes the
+  region (a `notice`, or arming/finalizing undo via add/toggle/edit/delete/clear/undo) resets the
+  announcement to null — so a move message never coexists with, nor outlives, a later unrelated
+  action. Because an `aria-live` region does not re-announce unchanged text, each announcement
+  carries a monotonically increasing sequence nonce (surfaced as `data-announce-seq`) so an
+  identical repeated message (e.g. ArrowUp twice at index 0) still re-renders and re-announces.
+  Falsify (`tests/App.reorder.test.jsx`): status text after a keyboard move equals the position
+  copy and after an end no-op equals the top/bottom copy; toggling a todo after a move removes the
+  move text from the region; two successive ArrowUp presses at index 0 emit the identical no-op copy
+  with `data-announce-seq` incremented on each press.
 - **R6.** The new order persists through the **unchanged** whole-list `PUT`: a move issues exactly one
   `PUT` of the whole `todos` array in its new order, and a subsequent `GET` returns that order on both
   runtimes. Falsify: R3/R4 assert the single new-order `PUT`; the existing verbatim round-trip in
   `tests/handler.test.js` and `tests/cloud/worker-contract.test.js` already proves array order is
   stored and returned unchanged (no server code changes, so no new server test is warranted).
 - **R7.** The handle is a real `<button>`, the **first** focusable control in each row (Tab order:
-  handle → checkbox → text → Edit → Delete), sitting in a reserved ~20px left gutter, hidden at rest
-  and revealed on row hover or focus-within. Falsify (`tests/App.a11y.test.jsx`): each row's first
-  focusable element is the reorder handle with an accessible name; the reveal styling is a visual
-  concern proven by the `reordering` recording and the regenerated still baselines (Docs impact).
+  handle → checkbox → text → Edit → Delete), sitting in a reserved ~20px left gutter. In a
+  **reorderable** context it is hidden at rest and revealed on row hover or focus-within; in a
+  **non-reorderable** (disabled) context it is instead **visible-but-dimmed at rest** (no hover
+  needed) so the affordance stays discoverable, per the design brief's `filtered` state. Falsify
+  (`tests/App.a11y.test.jsx`): each row's first focusable element is the reorder handle with an
+  accessible name; in a disabled context the handle is present at rest without hover; the
+  reveal/dim styling is a visual concern proven by the `reordering` recording and the regenerated
+  still baselines (Docs impact).
 
 `moveTodo` oracle (R1; `list = [A,B,C,D]`, moved by id):
 
@@ -74,6 +99,15 @@ or ordering concept; the stored array order *is* the order.
 | B → 1 | `A, B, C, D` (same ref — no-op) |
 | C → 99 | `A, B, D, C` (clamped to last) |
 | X → 1 | `A, B, C, D` (absent — same ref) |
+
+Drag oracle (R4; `list = [A,B,C,D]`, dragged item origin index `i`, rendered rows 0..3 with a
+placeholder at `i`):
+
+| drag | pointer over | half | g | toIndex | result / PUT |
+|---|---|---|---|---|---|
+| A down (`i`=0) | row C (`r`=2) | lower | 3 | 2 | `B, C, A, D` |
+| D up (`i`=3) | row A (`r`=0) | upper | 0 | 0 | `D, A, B, C` |
+| A (`i`=0) | placeholder row (`r`=0) | either | 0 / 1 | 0 | same ref — zero `PUT` |
 
 ### Non-goals
 
@@ -119,20 +153,24 @@ new surface the PRD forbids).
 
 - **`src/todos.js`** — add pure `moveTodo(list, id, toIndex)`: find index; if absent return `list`;
   clamp `toIndex` to `[0, length-1]`; if clamped equals current index return `list` (same ref);
-  else splice out and re-insert. (Per R1/INV-PERMUTATION.)
+  else splice out and re-insert so the item lands at `toIndex`. (Per R1/INV-PERMUTATION.)
 - **`src/App.jsx`** — reorder wiring:
   - `reorderable = filter === 'all' && !sortByDate` (one derived boolean).
   - Per-row drag handle `<button>` rendered **first** in each `<li>`; disabled presentation +
     tooltip when `!reorderable`.
   - `onKeyDown` on the handle: ArrowUp/Down → `setTodos(cur => moveTodo(cur, id, indexOf(id) ± 1))`,
-    then announce; inert when `!reorderable`.
+    then announce; inert when `!reorderable`. A "Press ↑ / ↓ to move" hint (`aria-describedby`) shows
+    while the handle is focused in a reorderable context (R3).
   - Pointer drag on the handle: pointerdown starts it, pointermove computes the target gap from row
-    rects and renders the drop indicator, pointerup commits `moveTodo`; guarded by `reorderable`.
-  - New `announcement` state rendered inside the **existing** `role="status"` region (R5); a move
-    also clears `notice` and `finalizeUndo()`s (a reorder is a genuine mutation, not itself undoable).
-  - Handle gutter, hover/focus-within reveal, grab cursor, drop-indicator, and settle highlight are
-    Tailwind/`src/index.css` classes drawn from existing tokens; settle + drag motion honor
-    `prefers-reduced-motion`.
+    rects (R4 geometry) and renders the lifted row + source-gap placeholder + drop indicator,
+    pointerup commits `moveTodo`; guarded by `reorderable`.
+  - New `announcement` state (`{ text, seq }`) rendered inside the **existing** `role="status"`
+    region (R5); setting it clears `notice` and `finalizeUndo()`s, and it is reset to null by any
+    later status-writing action; the `seq` nonce (as `data-announce-seq`) forces re-announcement of
+    identical repeated copy.
+  - Handle gutter, hover/focus-within reveal (dimmed-at-rest when disabled), grab cursor, lifted-row
+    + source-gap placeholder + drop-indicator (R4), and settle highlight are Tailwind/`src/index.css`
+    classes drawn from existing tokens; settle + drag motion honor `prefers-reduced-motion`.
 - **`docs/screenshots/scenes.json`** — add the `reordering` **recording** scene (the interaction a
   still can't show). **`scripts/screenshots.mjs`** — add a keyboard-move (and/or drag) action verb the
   recording scripts (builder infra for the new scene).
@@ -140,8 +178,8 @@ new surface the PRD forbids).
   ArrowUp/Down, and that it is available only in the All view with manual order.
 
 Wiring the builder can't infer: put the **drop-index geometry behind a pure helper** (row rects +
-pointer Y → target index) so R4 is unit-testable with stubbed rects, rather than reading layout
-inside the event handler.
+pointer Y → `toIndex` per the R4 rule) so R4 is unit-testable with stubbed rects, rather than reading
+layout inside the event handler.
 
 ### Architecture impact
 
