@@ -223,6 +223,32 @@ describe('R3 — keyboard reorder', () => {
     fireEvent.focus(handleFor('Alpha'));
     expect(screen.queryByText('Press ↑ / ↓ to move')).not.toBeInTheDocument();
   });
+
+  it('a disabled handle exposes a non-dangling aria-describedby that resolves to the disabled-reason text', async () => {
+    await renderSeeded(THREE);
+    // Filter to a non-reorderable context (R2): the handle becomes disabled.
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    const handle = handleFor('Alpha');
+    fireEvent.focus(handle);
+    const describedById = handle.getAttribute('aria-describedby');
+    // Must actually be present (not omitted / not the enabled-context 'reorder-hint').
+    expect(describedById).toBeTruthy();
+    expect(describedById).not.toBe('reorder-hint');
+    // The id must resolve to a REAL, always-present element (not dangling), whose
+    // text content carries the disabled reason — the same message the title
+    // tooltip uses — so a screen-reader user tabbing to the inert handle gets an
+    // explanation, unlike a bare (unreliable) title attribute.
+    const described = document.getElementById(describedById);
+    expect(described).not.toBeNull();
+    expect(described).toHaveTextContent(
+      'Reordering is only available in the All view with manual order'
+    );
+    // The description text is present in the DOM even before focus (always-present,
+    // not conjured on demand) — dangling-reference-proof for any AT that resolves
+    // the id lazily.
+    fireEvent.blur(handle);
+    expect(document.getElementById(describedById)).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
