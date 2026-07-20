@@ -9,9 +9,9 @@ properties that make it more than a log: it is a **resumable state machine** and
 ## Entry types
 
 Each line is a self-contained, timestamped record. Types: `open` (work item; carries `size`
-trivial/standard/epic, which drives the driver's path but never the gate math), `finding`, `rebut`,
+trivial/standard/epic, which drives the workflows' path but never the gate math), `finding`, `rebut`,
 `defer` (a minor/nit parked as follow-up work), `fix`, `test`, `verdict`, `round`, `note` (a recorded
-observation, e.g. the pm's design-conformance result), `gate`, and `await` (a marker that the cycle is
+observation, e.g. the pm's PRD-conformance result), `gate`, and `await` (a marker that the cycle is
 blocked on operator input, so `sdlc.py timing` can keep that wait out of a phase's active duration).
 
 A gate opens only when every blocker/major is either **rejected** by the arbiter or **fixed + proven**

@@ -9,23 +9,43 @@ Splitting into opposed incentives — one rewarded for shipping, one for finding
 surfaces defects a cooperative reviewer would wave through. The system is **adversarial in
 incentives, cooperative in outcome**.
 
-## Two phases, one session
+## Two workflows, two surfaces
 
-Both phases run in **one long-running session** on the **PR** (triggered once by the `sdlc` issue
-label; the design is mirrored back to the issue):
+The cycle is **two separate workflows**, each on its own surface with its own cadence:
 
-- **Product/design** — lightweight and human-driven. The `pm` agent and the operator refine intent
-  through explicit questions. No adversary, arbiter, or ledger; its only bar is that the operator
-  approves the design. Advances on `@claude continue`.
-- **Engineering** — the adversarial cycle. Two teams and a referee, backed by the ledger.
+- **Product** — lightweight and human-driven, **on the issue**. The `pm` agent and the operator
+  iterate a **PRD** (product requirements document) directly in the issue body; each comment fires a
+  short session that does one iteration and ends. No adversary, arbiter, ledger, branch, or PR; its
+  only bar is that the operator approves the PRD with `@claude continue`. Entered by the `sdlc` label.
+- **Engineering** — the adversarial cycle, **on the PR**, in one long-running session: the very
+  session that receives the ratifying `@claude continue` claims the branch, opens the PR, snapshots
+  the PRD into `docs/specs/`, and continues as the engineering driver — the handoff is a
+  continuation, not a re-trigger. It swaps the issue's label to `sdlc-build`, which is the **state
+  marker** and the event-based entry for the other two paths: a human applying it directly to skip
+  product (the issue body is then the ratified PRD), or restarting a cycle whose session died. The
+  cycle drives spec+build+test to merge-ready: two teams and a referee, backed by the ledger.
+
+### The design facet (product, opt-in)
+
+When the PRD declares **`Design-impact: yes`** (a new or significantly changed user-facing
+surface), the product loop gains a second artifact: the `designer` agent produces **mockups**
+(self-contained HTML per screen/state, committed with rendered screenshots) and a **design
+brief** (interaction notes; each state marked binding or illustrative). They iterate alongside
+the PRD prose — **asynchronously**: each iteration posts the prose revision immediately and
+renders mockups as a rev-stamped tail, so the operator never waits on pixels — and the same
+`@claude continue` ratifies both. Engineering builds against the brief as **direction, not a
+pixel contract**: the architect anchors the spec's `visual:` declarations on its binding
+states, and the pm's TEST conformance pass checks the built screenshots against them.
+Mechanics live in the product driver (§3b) and [designer.md](../../.claude/agents/designer.md).
 
 ## Sizing — the pipeline is priced per issue
 
-Before any phase runs, the issue is sized (`open --size …`, recorded on the ledger):
+The product workflow sizes the issue at pickup (recorded on the ledger when engineering opens the
+item, `open --size …`):
 
-- **trivial** — obvious, contained fix. Fast path: PRODUCT skipped (the issue text is the
-  design), a ≤25-line mini-spec instead of a full one, one diff-scoped round. Proof stays
-  (real round, proving test, gates); ceremony goes.
+- **trivial** — obvious, contained fix. Fast path: the PRD iteration is skipped (the issue text
+  is the PRD, handed straight to engineering), a ≤25-line mini-spec instead of a full one, one
+  diff-scoped round. Proof stays (real round, proving test, gates); ceremony goes.
 - **standard** — fits one reviewable PR. The full cycle below.
 - **epic** — too big for one reviewer to hold. **Never builds directly**: the operator
   approves a split into 2–4 independently shippable child issues, each running its own
@@ -35,7 +55,7 @@ Before any phase runs, the issue is sized (`open --size …`, recorded on the le
 
 | Team | Agent | Wins when… |
 |------|-------|------------|
-| Blue | `pm` | the design is clear, the operator approves it, and the built result matches it |
+| Blue | `pm` | the PRD is clear, the operator approves it, and the built result matches it |
 | Blue | `architect` | the spec + plan is unambiguous and survives scrutiny |
 | Blue | `builder` | the implementation satisfies the ratified spec |
 | Blue | `defender` | every finding is fixed or convincingly rebutted |
@@ -49,23 +69,25 @@ a gate opens.
 
 ## Phases & gates
 
-**PRODUCT** is human-only (design on the PR, mirrored to the issue); the rest is the adversarial
-engineering cycle, where each **gate** is a hard stop owned by the `arbiter`.
+**PRODUCT** is the human-only product workflow on the issue; everything after ratification is
+the adversarial engineering workflow on the PR, where each **gate** is a hard stop owned by the
+`arbiter`.
 
 ```
-  PRODUCT ═══(@claude continue)══▶ SPEC ──▶ BUILD ──▶ ATTACK ──▶ DEFEND ──▶ VERIFY ──▶ MERGE
-  (PR)                             │                    ▲           │                   │
-  human + pm                       gate                 └───────────┘                   gate
-  (approve)                      (ratify)          adversarial round loop            (release)
+  PRODUCT ═(@claude continue → sdlc-build)═▶ SPEC ──▶ BUILD ──▶ ATTACK ──▶ DEFEND ──▶ VERIFY ──▶ MERGE
+  (issue)                                    │                    ▲           │                   │
+  human + pm iterate the PRD                 gate                 └───────────┘                   gate
+  (approve)                                (ratify)          adversarial round loop            (release)
 ```
 
-1. **PRODUCT** *(PR, human-only)* — `pm` turns the request into a clear design (what & why
+1. **PRODUCT** *(issue, human-only)* — `pm` turns the request into a clear PRD (what & why
    for users, not how), asking the operator until they approve. May embed high-level
-   architectural direction only where it's critical to the feature. Gate: `@claude continue`.
+   architectural direction only where it's critical to the feature. Gate: `@claude continue` —
+   the ratifying session opens the PR and continues into engineering.
 2. **SPEC** — `architect` writes the technical spec **and** implementation plan in one document
-   from the ratified design. `adversary` attacks it both for correctness (ambiguity, missing
+   from the ratified PRD. `adversary` attacks it both for correctness (ambiguity, missing
    requirements, untestable claims) **and for economy** — duplication, implementation-transcription,
-   design re-derivation, over-budget length — so the loop can *remove* spec, not only add it; the
+   PRD re-derivation, over-budget length — so the loop can *remove* spec, not only add it; the
    `spec economy` ratio (advisory) makes the proportion visible. Gate: spec ratified (the only human
    checkpoint in engineering).
 3. **BUILD** — `builder` implements the ratified spec. Nothing else.
@@ -76,7 +98,7 @@ engineering cycle, where each **gate** is a hard stop owned by the `arbiter`.
    touches a trust boundary, round 1 must include a **STRIDE threat-model pass**; CI's semgrep
    and dependency-audit jobs are the mechanical floor beneath it. In round 1 a **Copilot
    review** supplies second-lineage *leads* the adversary validates before filing. In the
-   same round the `pm` re-checks the built result against the **design** — mandatory,
+   same round the `pm` re-checks the built result against the **PRD** — mandatory,
    recorded on the ledger even when clean (`note`) — and files a finding on any divergence.
    The pm also confirms or refutes the spec's **Docs-impact declaration** with a
    `visual:`/`docs:` **disposition** and is the sole approver of a baseline change; a delivered
@@ -132,3 +154,4 @@ state derivation, and parallel-workflow merge — are in **[internals.md](intern
 Operator quickstart is in **[../../CLAUDE.md](../../CLAUDE.md)**; the ledger CLI is
 `python SDLC/sdlc.py --help`. To set up the routine that runs the whole cycle from GitHub, see
 **[SETUP.md](SETUP.md)**.
+

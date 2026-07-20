@@ -3,7 +3,7 @@
 no disposition reply.
 
 The driver solicits a Copilot review as second-opinion leads and owes every one of its
-threads a disposition reply before merge-ready (driver §6.2). This is the mechanical
+threads a disposition reply before merge-ready (engineering driver §7.2). This is the mechanical
 backstop, scoped to reviews the framework itself solicits — human review threads stay in the
 human's hands.
 
@@ -80,7 +80,7 @@ def main() -> int:
     if unanswered:
         print(f"::error title=arbiter-gate::{len(unanswered)} solicited (Copilot) review "
               f"thread(s) have no disposition reply — each needs one before merge-ready "
-              f"(fixed via <F-id> / covered by <test file::name> / rebutted — driver §6.2):")
+              f"(fixed via <F-id> / covered by <test file::name> / rebutted — driver §7.2):")
         for c in unanswered:
             print(f" - {c.get('path')}:{c.get('line') or c.get('original_line')} — "
                   f"{(c.get('body') or '')[:100].strip()!r} → {c.get('html_url')}")

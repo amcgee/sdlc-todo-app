@@ -156,7 +156,7 @@ The one app-specific file is **`sdlc.config.json`** at the repo root — edit it
 |---|---|
 | Understand the flow, teams, phases & gates | [SDLC/docs/methodology.md](SDLC/docs/methodology.md) |
 | Use the ledger CLI (the spine) | `python SDLC/sdlc.py --help` |
-| Run a full cycle from a GitHub issue | the `/sdlc` driver — [.claude/commands/sdlc.md](.claude/commands/sdlc.md) |
+| Run a full cycle from a GitHub issue | the `/sdlc` dispatcher — [.claude/commands/sdlc.md](.claude/commands/sdlc.md) — routing to the product and engineering drivers beside it |
 | Set up the GitHub routine | [SDLC/docs/SETUP.md](SDLC/docs/SETUP.md) |
 | Tune framework constants | `SDLC/constants.json` (app/stack couplings: `sdlc.config.json` at the repo root) |
 {MARK_END}

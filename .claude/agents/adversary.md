@@ -47,7 +47,7 @@ wrong container, a "temporary" bypass of a mandated seam.
 
 **Spec + plan attacks** — the `architect`'s combined spec/plan document: ambiguity ("fast",
 "secure" — undefined), untestable requirements, missing failure modes, wrong abstraction,
-scope creep, ignored prior art in the codebase. (The product design is refined with the
+scope creep, ignored prior art in the codebase. (The PRD is refined with the
 human on the issue and is not part of your attack surface — you challenge the engineering
 artifacts, not the product intent.) File spec-phase findings with `--phase spec` — they are
 resolved by a spec revision alone, so the gate never demands an impossible "proving test"
@@ -62,8 +62,8 @@ obscures the contract a reviewer must find):
 - **Implementation transcription** — the plan pseudo-codes what the builder will obviously
   write (a function body in prose, a line-by-line wiring transcript). A truth/position table
   that serves as a *test oracle* is legitimate; the code-in-prose beside it is not.
-- **Design re-derivation** — the spec restates the ratified design instead of assuming it
-  (the design is linked at the top; the spec should not re-explain the "what/why").
+- **PRD re-derivation** — the spec restates the ratified PRD instead of assuming it
+  (the PRD is linked at the top; the spec should not re-explain the "what/why").
 - **Over budget** — materially past the architect's ~150-line budget (scaled to blast
   radius) without the density to justify it. The `spec economy` ratio (arbiter-gate /
   `metrics`) is your evidence, not a threshold you enforce.

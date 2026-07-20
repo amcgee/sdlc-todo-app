@@ -1,4 +1,4 @@
 [submodule "vendor/agentic-sdlc"]
 	path = vendor/agentic-sdlc
-	url = https://github.com/amcgee/test-agentic-sdlc
-	branch = claude/extract-todo-app-xcjhf7
+	url = https://github.com/amcgee/agentic-sdlc
+	branch = claude/workflow-split-design-phase-cqa3gm

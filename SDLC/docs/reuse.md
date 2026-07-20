@@ -44,12 +44,13 @@ reader `SDLC/lib/manifest.py`, in any language. The framework version is
   schema epoch, round cap, finding budget), the library `lib/` (the manifest reader
   `manifest.py` + the pre-fix spot-check `spot_check.py`), the docs (`docs/`), the driver output
   templates
-  (`templates/`, read by `.claude/commands/sdlc.md`), the framework's own test suites
+  (`templates/`, read by the drivers in `.claude/commands/`), the framework's own test suites
   (`tests/test_*.py`) and framework scripts (`scripts/`, e.g. the doc-link checker and the CI
   check logic under `scripts/ci/`). `SDLC/` carries **no mutable state** — the ledger lives
   outside it (default `.sdlc/ledger/` at the repo root, §2) — so the directory is fully
   immutable and copies (or mounts as a submodule) **unedited**, with no exceptions.
-- **`.claude/`** — `agents/`, `skills/`, `commands/sdlc.md`, and the hooks
+- **`.claude/`** — `agents/`, `skills/`, `commands/` (the `sdlc.md` dispatcher + the
+  `sdlc-product.md` / `sdlc-engineering.md` workflow drivers), and the hooks
   `gate_guard.py` + `git_branch_guard.py` + `bash_write_guard.py`. Merge this repo's
   `.claude/settings.json` (the hook wiring, the `ask`/`deny` permission lists, and
   `env.SDLC_ENFORCE`) and the `CLAUDE.md` operator section into the target's.
@@ -126,10 +127,11 @@ is right, save for the project-runtime step (Install Bun) you swap for your runt
 
 ## 4. Platform prerequisites
 
-The driver assumes: the **GitHub MCP** tools (branch claim, PR ops, `subscribe_pr_activity`),
-optionally **Copilot review** as the round-1 second opinion (skipped cleanly if absent),
-and the **claude-code-remote** `send_later` tool for self check-ins. A port on another
-platform reimplements these touch points in `.claude/commands/sdlc.md`.
+The drivers assume: the **GitHub MCP** tools (issue/label ops for the product workflow;
+branch claim, PR ops, `subscribe_pr_activity` for engineering), optionally **Copilot review**
+as the round-1 second opinion (skipped cleanly if absent), and the **claude-code-remote**
+`send_later` tool for self check-ins. A port on another platform reimplements these touch
+points in the drivers under `.claude/commands/`.
 
 ## 5. Start clean and smoke-test
 

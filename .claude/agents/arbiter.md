@@ -47,7 +47,7 @@ never hold a gate.
 
 **At the spec gate, weigh economy, not just correctness.** A correct spec can still be a
 bad spec if it's bloated — the adversary can now file over-specification (duplication,
-implementation-transcription, design re-derivation, over-budget). Rule on those like any
+implementation-transcription, PRD re-derivation, over-budget). Rule on those like any
 finding, and when the `spec economy` ratio is high (the advisory number on the PR / in
 `metrics`), say so in your spec-gate round summary — a spec several times longer than the
 code it will produce is a process cost even when every requirement is individually valid.

@@ -20,15 +20,15 @@ whether the round was clean. This is the core loop of the adversarial SDLC.
    python SDLC/sdlc.py round --item <ID> --by adversary
    ```
 
-1. **Attack & design-conformance review.** Dispatch the `adversary` agent against the
+1. **Attack & PRD-conformance review.** Dispatch the `adversary` agent against the
    implementation (correctness, security, edge cases; budget: ≤8 ranked findings) **and**
-   the `pm` agent to review the built, tested result against the design (the design file
-   `docs/specs/<n>-<slug>.md`). The adversary files defects; the `pm` files any divergence
-   from the ratified design (missing in-scope capability, crept-in non-goal, behavior that
+   the `pm` agent to review the built, tested result against the PRD (the PRD file
+   `docs/specs/<n>-<slug>-prd.md`). The adversary files defects; the `pm` files any divergence
+   from the ratified PRD (missing in-scope capability, crept-in non-goal, behavior that
    doesn't match) — **and when the build conforms, records that on the ledger**
-   (`sdlc.py note --item <ID> --by pm --msg "design conformance: clean (round N)"`).
+   (`sdlc.py note --item <ID> --by pm --msg "PRD conformance: clean (round N)"`).
    The pm pass is mandatory every round; a round without a pm note or pm findings is
-   incomplete (on a **trivial** item the design is the issue text and the adversary records
+   incomplete (on a **trivial** item the PRD is the issue text and the adversary records
    the conformance note itself). If this is a **re-attack round** (the previous round
    produced fixes), scope the adversary to the fix diff and its blast radius, not a full
    re-sweep. Hand the adversary the **diff-coverage report** (the manifest's
