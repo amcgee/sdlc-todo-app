@@ -860,8 +860,9 @@ test('moveTodo: an absent id returns the SAME list reference', () => {
 
 test('moveTodo: a clamped destination equal to the current index is a same-ref no-op', () => {
   const list = abcd();
-  // C is at index 2; clamping 99 down would move it, but clamping to its own index does not.
-  const next = moveTodo(list, 'A', 0);
+  // D is already last (index 3 in a 4-item list); toIndex 99 clamps down to 3 — D's
+  // own current index — so the clamped move must still be a same-ref no-op.
+  const next = moveTodo(list, 'D', 99);
   expect(next).toBe(list);
 });
 

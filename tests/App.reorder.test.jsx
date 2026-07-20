@@ -289,6 +289,30 @@ describe('R5 — move announcement', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Alpha moved to position 2 of 3.');
   });
 
+  it('the announced item and position match the actually-committed order (derived from the move result)', async () => {
+    await renderSeeded(FOUR);
+    const handle = handleFor('Bravo');
+    handle.focus();
+    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+
+    // Parse the announced item name + position number out of the live region.
+    const status = screen.getByRole('status');
+    const match = status.textContent.match(/^(.*) moved to position (\d+) of (\d+)\.$/);
+    expect(match).not.toBeNull();
+    const [, announcedItem, announcedPos, announcedTotal] = match;
+
+    // The announced values must equal what actually rendered/committed: Bravo's real
+    // index in the new order, and the real list length.
+    const order = renderedOrder(); // e.g. ['Reorder Alpha', 'Reorder Charlie', ...]
+    const committedIndex = order.indexOf(`Reorder ${announcedItem}`);
+    expect(committedIndex).toBeGreaterThanOrEqual(0);
+    expect(Number(announcedPos)).toBe(committedIndex + 1);
+    expect(Number(announcedTotal)).toBe(order.length);
+    // Sanity: this was a real downward move, not a boundary no-op.
+    expect(announcedItem).toBe('Bravo');
+    expect(order).toEqual(['Reorder Alpha', 'Reorder Charlie', 'Reorder Bravo', 'Reorder Delta']);
+  });
+
   it('an end-of-list no-op announces the top / bottom copy', async () => {
     await renderSeeded(THREE);
     handleFor('Alpha').focus();

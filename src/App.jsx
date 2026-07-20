@@ -172,8 +172,13 @@ export default function App() {
       announceMove(`${item.text} is already at the bottom.`);
       return;
     }
-    setTodos((cur) => moveTodo(cur, id, target));
-    announceMove(`${item.text} moved to position ${target + 1} of ${todos.length}.`);
+    // Compute the moved list once and announce from THAT result, so the aria-live
+    // text is derived from the exact list being committed — it can never diverge
+    // from the stored order, even if a second reorder event is handled before React
+    // re-renders.
+    const next = moveTodo(todos, id, target);
+    setTodos(next);
+    announceMove(`${item.text} moved to position ${target + 1} of ${next.length}.`);
     markSettled(id);
   }
 
@@ -242,8 +247,11 @@ export default function App() {
     if (index === -1) return;
     if (drag.toIndex === index) return; // dropped back on its origin -> no move, no PUT (R4)
     const item = todos[index];
-    setTodos((cur) => moveTodo(cur, drag.id, drag.toIndex));
-    announceMove(`${item.text} moved to position ${drag.toIndex + 1} of ${todos.length}.`);
+    // Announce from the same list the move commits (see the keyboard handler), so the
+    // aria-live text always matches the committed order.
+    const next = moveTodo(todos, drag.id, drag.toIndex);
+    setTodos(next);
+    announceMove(`${item.text} moved to position ${drag.toIndex + 1} of ${next.length}.`);
     markSettled(drag.id);
   }
 
@@ -649,9 +657,11 @@ export default function App() {
               aria-label={`Reorder ${todo.text}`}
               aria-disabled={!reorderable || undefined}
               aria-describedby={
-                reorderable && focusedReorderId === todo.id
-                  ? 'reorder-hint'
-                  : undefined
+                reorderable
+                  ? focusedReorderId === todo.id
+                    ? 'reorder-hint'
+                    : undefined
+                  : 'reorder-disabled-hint'
               }
               title={
                 reorderable
@@ -814,6 +824,14 @@ export default function App() {
           Press ↑ / ↓ to move
         </p>
       )}
+
+      {/* Always-present, screen-reader-only reason a disabled handle is inert. Kept
+          out of the DOM flow visually (the handle's hover tooltip is the sighted
+          affordance) but permanently rendered so a disabled handle's
+          aria-describedby target never dangles. */}
+      <p id="reorder-disabled-hint" className="sr-only">
+        Reordering is only available in the All view with manual order
+      </p>
 
       <div className="flex items-center justify-between mt-4 text-sm">
         <span className="text-muted-foreground">{remaining} items left</span>
