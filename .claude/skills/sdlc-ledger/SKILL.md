@@ -30,6 +30,7 @@ open ──▶ finding ──▶ rebut ──▶ verdict(rejected)  ✓ resolved
 | `defer --ref <ITEM>-F# --by defender --msg "…"` | defender | park a minor/nit as follow-up (CLI refuses blocker/major) |
 | `fix --ref <ITEM>-F# --by builder --msg "…"` | builder, architect | record a code fix (or spec revision) |
 | `test --ref <ITEM>-F# --by verifier --test file[::name] --pre-sha … --post-sha … --msg "…"` | verifier | record a proving test — must name its test(s) AND both anchor commits; CI checks the tests exist |
+| `attest --ref <ITEM>-F# --by verifier --file path [--kind comment] --msg "…"` | verifier | prove a **non-behavioral** fix (a test oracle, a doc, a comment — no fail→pass test can exist); names every file touched. Files outside `shipped_paths` stand on location; a comment-only change inside product code needs `--kind comment` (flagged for arbiter/human review) |
 | `verdict --ref <ITEM>-F# --by arbiter --ruling accepted\|rejected` | arbiter | rule a **rebutted** finding (CLI refuses undisputed refs; `--force` = operator override) |
 | `note --item ID --by ROLE --msg "…"` | any | recorded observation (e.g. the pm's "PRD conformance: clean", defer→issue links) |
 | `gate --item ID --phase PHASE` | arbiter | compute a gate decision |

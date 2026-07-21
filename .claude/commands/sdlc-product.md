@@ -65,11 +65,13 @@ motivation, Scope, Non-goals, Success criteria; plus **Architectural direction**
 technical constraint is critical to the feature), its **Design-impact** judgment, and a short
 list of **open questions**.
 
-- **Rewrite the issue body as the PRD**, exactly this layout — the body carries the PRD only,
-  no status line, no session link, no phase checklist. Bump `PRD-rev` by one on **every**
-  rewrite; the design facet keys on it (§3b):
+- **Rewrite the issue body as the PRD**, exactly this layout — a one-line **Status banner** at
+  the top (the product analog of the engineering PR-body Status line, §3c), then the PRD, then a
+  metadata block. Bump `PRD-rev` by one on **every** rewrite; the design facet keys on it (§3b):
 
   ```
+  **Status:** <live state> · since <ts>
+
   <the PRD text>
 
   **Size:** <trivial|standard>
@@ -78,6 +80,10 @@ list of **open questions**.
 
   <details><summary>Original request</summary>…original body, preserved verbatim…</details>
   ```
+
+  The Status banner and the metadata block are **product-phase scaffolding** — engineering
+  strips both when it snapshots the ratified PRD to its file (§2 there); the frozen PRD is prose
+  only.
 
 - **Comment on the issue** with a short prose summary of what changed and the open questions
   as a list. **If the design tail is about to run this iteration** (§3b decides — entering
@@ -90,7 +96,9 @@ list of **open questions**.
 - **Design tail (only when the design facet is active, §3b):** after the comment is posted,
   run the tail — the operator never waits on pixels to read the prose, but the prose already
   told them pixels are coming.
-- **End the session.** The operator's next comment fires the next iteration.
+- **Set the Status banner to the wait and end the session** (§3c): the last body edit sets
+  `⏳ awaiting operator: \`@claude continue\` / \`@claude <feedback>\` · since <ts>`. The
+  operator's next comment fires the next iteration.
 
 ## 3b. The design facet (`Design-impact: yes` only)
 
@@ -136,11 +144,37 @@ force-push over it.
 head is a one-line comment ("no PRD change; updating mockups"), `PRD-rev` does not bump, and
 the tail does the work.
 
+## 3c. Status & waiting signals — keep the issue Status banner live
+
+The engineering PR body has a Status line the operator can glance at; the product phase has no
+PR, so the **issue body's Status banner** plays that role. Keep it live by **editing the issue
+body — no new comment** (a body edit notifies no one, unlike a comment; comments stay reserved
+for the substantive iteration summaries). Set it at each transition, always with a `since <ts>`
+so lag is visible:
+
+- **on claiming a firing**, before the `pm`/designer does its work → `✍️ drafting rev <k+1>
+  (pm)` (or `📋 sizing` on kickoff);
+- **during the design tail** (§3b) → `🎨 rendering mockups (rev <k>)`;
+- **as the firing ends and parks on the operator** — the last thing before you stop → `⏳
+  awaiting operator: \`@claude continue\` / \`@claude <feedback>\``. This is the persistent
+  waiting signal: its `since <ts>` shows at a glance how long the ball has been in the
+  operator's court, and it survives the firing (the body is on the issue, not tied to the
+  session).
+
+So a passer-by reading the issue always sees *where the cycle is and who it's waiting on*,
+without scrolling the comment history — the same at-a-glance state the PR body gives
+engineering.
+
 ## 4. Ratify & continue into engineering (`@claude continue`)
 
 - If no PRD has been drafted (a `continue` straight after kickoff, or on a proposed epic split
   — the operator choosing to proceed as one item), the current issue body **is** the ratified
   PRD; ensure the `**Size:**` line is present (apply §2's rubric).
+- **Resolve open questions into the artifacts.** Before ratifying, fold every outstanding PRD
+  question (and, if the design facet ran, every provisional item in the design brief) into the
+  artifact — the operator's answers where given, a stated default (with rationale) for anything
+  they ratified without answering. A ratified PRD or brief carries **no open-questions section**:
+  by `@claude continue` each was answered or resolved by proceeding, so it records the decision.
 - **Design catch-up (facet active only):** `continue` ratifies the PRD as written and the
   mockups as direction. If the last posted mockup set lags the final `PRD-rev`, regenerate
   once (§3b tail, no staleness yield — ratification owns the final set) and embed the final
@@ -153,7 +187,10 @@ the tail does the work.
   `sdlc-build`, then remove `sdlc`** — as state marker, not trigger: the session that label
   event fires finds your live claim and defuses itself (engineering §0's backstop).
 - Comment on the issue: *"✅ PRD ratified — engineering PR opened: <PR link>. All further
-  interaction happens there. Follow along: `<session>`"*.
+  interaction happens there. Follow along: `<session>`"*, and set the issue body's Status
+  banner to the terminal product state — `✅ ratified — engineering on <PR link> · since <ts>`
+  — so the issue never shows a stale `⏳ awaiting` after the handoff (this is the last edit to
+  the issue body; engineering then leaves it alone, §2 there).
 - Then continue from engineering §2 (open the ledger item, snapshot the PRD) in **this
   session**, which now lives on the PR until merge-ready — do **not** stop.
 

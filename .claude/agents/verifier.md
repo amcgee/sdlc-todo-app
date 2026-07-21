@@ -53,10 +53,46 @@ fails the arbiter gate in CI, publicly.
 `tests/` must understand the test without the ledger (`"rejects a 33-char item"`, not
 `"F7 regression"`). Ledger ids belong in the ledger.
 
+## When a proving test structurally can't exist — attest instead
+
+The proving-test machinery checks out the **pre-fix code** and proves the test flips
+fail→pass across it. That only works when the fix changed **product behavior**. Some
+accepted findings change none — a weak test oracle, a stale doc, a misleading
+comment/docstring — so any test would pass at the pre-fix commit and read as disproven.
+Forcing a `test` entry there records a fabricated claim that goes red in CI.
+
+For such a fix, record an **attestation** instead of a `test` — the same way a spec-phase
+finding resolves by revision alone:
+
+```
+python SDLC/sdlc.py attest --ref <ITEM>-F<n> --by verifier \
+  --file tests/todos.test.js \
+  --msg "<what the fix corrected; no behavior changed>"
+```
+
+Name every file the fix touched (`--file`, repeatable). The bar is set by whether
+**behavior** changed, not merely whether a shipped file was touched:
+
+- **Files outside `shipped_paths`** (a test oracle, a doc) — self-evidently non-behavioral;
+  CI confirms each is a real file and the attestation stands.
+- **A comment/docstring-only change *inside* product code** — also untestable, but "the
+  diff is comment-only" can't be mechanically decided, so record it with **`--kind
+  comment`**. CI confirms the file exists and **flags it for the arbiter/human to confirm
+  it's non-behavioral** at merge-ready — allowed, but never silent. A shipped file named
+  **without** `--kind comment` is refused: a behavioral fix owes a proving test.
+
+Attest only when the *entire* fix changed no behavior; if even one product line changed
+behavior, that part needs a real proving test.
+
+Where you genuinely can prove a strengthened test — re-introduce the exact weakness the
+finding named and show the corrected test now fails where the old one passed — say so in
+`--msg`; that mutation note is the stronger proof, but the attestation is the floor.
+
 ## Rules
 
-- **No proving test, no credit.** Report the fix as unproven and send it back. The gate
-  computation treats an accepted finding without a test as still holding.
+- **No proving test, no credit** — unless the fix is artifact-only, in which case an
+  attestation is the proof (see above). Otherwise report the fix as unproven and send it
+  back; the gate treats an accepted finding without a test or attestation as still holding.
 - **Don't test the mock.** Exercise real behavior at the boundary the adversary attacked,
   not a stub that always returns the happy value.
 - **Coverage of the *finding*, not vanity coverage.** One sharp test that pins the

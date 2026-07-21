@@ -141,18 +141,21 @@ conventional-commit label for the branch.
   **epic never builds**: comment on the issue that it needs a product split (remove `sdlc-build`,
   add `sdlc`), release the claim (delete the branch, close the PR) and stop.
 - `sdlc.py open --item ISSUE-<n> --title "<issue title>" --size <size>`, then **snapshot the
-  ratified PRD** from the issue body into the **PRD file** (naming below) — the PRD text only, minus
-  the collapsed original-request block. On a **trivial** item the issue text is the PRD; snapshot it
-  verbatim. **The PRD file is what every other agent references by path** (architect, builder, pm).
+  ratified PRD** from the issue body into the **PRD file** (naming below) — **the PRD prose only**:
+  drop the top `**Status:**` banner, the `**Size:**`/`**Design-impact:**`/`**PRD-rev:**` metadata
+  block, and the collapsed original-request block (all product-phase scaffolding, not PRD content).
+  On a **trivial** item the issue text is the PRD; snapshot it verbatim. **The PRD file is what every other agent references by path** (architect, builder, pm).
   Leave the issue body alone — it already holds the ratified PRD verbatim, and nothing edits it
-  again until the final outcome comment (§7). Give the PR body's `## PRD` section a one-paragraph
-  summary + a link to the file.
+  again until the final outcome comment (§7). Fill the PR body's `## Change summary` section — the
+  change **type** (matching the PR title's conventional-commit type) + a one-paragraph summary of
+  what's being built + a link to the PRD file.
 - Checkpoint (§6), then fall through to §3.
 
-**Spec file naming — descriptive, not opaque.** Name the two spec files with a short human-readable
+**Spec file naming — descriptive, not opaque.** Name the spec files with a short human-readable
 slug, not a bare `ISSUE-<n>`:
 - PRD: **`docs/specs/<n>-<slug>-prd.md`**
-- technical spec: **`docs/specs/<n>-<slug>-spec.md`**
+- technical spec (durable contract): **`docs/specs/<n>-<slug>-spec.md`**
+- build plan (disposable; pruned at ship): **`docs/specs/<n>-<slug>-plan.md`**
 
 where `<slug>` is the issue title kebab-cased — lower-case, non-alphanumerics collapsed to single
 hyphens, trimmed, and capped at ~6 words (e.g. issue #31 "Migrate to cloud" →
@@ -178,21 +181,27 @@ through a pause or abort. (No ledger item yet means §2 hasn't run — a kickoff
 ## 4. SPEC — the only human checkpoint (state = spec)
 
 - **Kickoff of spec, or `@claude <feedback>` → author/refine the spec, then stop.** `architect` writes
-  the technical-spec file `docs/specs/<n>-<slug>-spec.md` (technical spec **+** plan from the PRD);
-  `adversary` challenges it for ambiguity / missing requirements / untestable claims; `architect`
-  revises. Do **not** open the spec gate. Checkpoint (§6), comment the spec + open questions on the PR,
+  **two files** from the PRD — the durable contract `docs/specs/<n>-<slug>-spec.md` and the build
+  outline `docs/specs/<n>-<slug>-plan.md`; `adversary` challenges them for ambiguity / missing
+  requirements / untestable claims / over-specification; `architect` revises. Do **not** open the spec gate. Checkpoint (§6), comment the spec + open questions on the PR,
   and — as the **last** ledger action before stopping — mark the wait:
   `python SDLC/sdlc.py await --item ISSUE-<n> --for "spec continue"`
-  (this keeps the operator's think-time out of the phase's active timing, §6). Then **stop** — end
-  verbatim: *To advance, comment `@claude continue`. To iterate on the spec instead, reply `@claude`
-  with the changes you want.*
+  (this keeps the operator's think-time out of the phase's active timing, §6). Set the checkpoint's
+  Status line to the explicit wait — `SPEC — ⏳ awaiting operator: \`@claude continue\` on the spec ·
+  since <ts>` (§6) — so the parked state and how long it's been parked are visible at a glance. Then
+  **stop** — end verbatim: *To advance, comment `@claude continue`. To iterate on the spec instead,
+  reply `@claude` with the changes you want.*
   - **Trivial fast path:** no architect dispatch — YOU write a **mini-spec** (≤25 lines) into the
     `-spec.md` file: diagnosis (root cause, exact location), the planned fix, and the proving test
     you expect the verifier to write. One quick `adversary` pass over it (wrong-root-cause,
     missed-blast-radius — its findings tagged `--phase spec`), revise, checkpoint, comment it, await
     `@claude continue` as above. The mini-spec is the fast path's single human checkpoint.
-- **`@claude continue` → ratify.** `arbiter` rules the outstanding challenges, then
-  `sdlc.py gate --item ISSUE-<n> --phase spec`. Checkpoint, then continue the loop below **in this session**.
+- **`@claude continue` → ratify.** First have the `architect` **fold every open question into
+  the spec** — the operator's answers where given, an architect default (with rationale) for
+  anything they ratified without answering — so the frozen `-spec.md` carries no open-questions
+  section (a dangling question in a ratified artifact is a defect). Then `arbiter` rules the
+  outstanding challenges and `sdlc.py gate --item ISSUE-<n> --phase spec`. Checkpoint, then
+  continue the loop below **in this session**.
 
 ## 5. BUILD → TEST → MERGE — run straight through (no stop until merge-ready)
 
@@ -202,12 +211,16 @@ After the spec gate opens, loop in this run: re-derive `state`, do the one step 
 |---------|----|------|
 | **build** | `touch .sdlc/ledger/.build-open`; `builder` implements the ratified spec; `rm …/.build-open`; smoke-check; `sdlc.py gate --item ISSUE-<n> --phase build`. | checkpoint → loop |
 | **test** | `sdlc.py round --item ISSUE-<n>`, then the `adversarial-review` skill for **one round**: `adversary` attacks the code (≤8 ranked findings; fix-diff-scoped on a re-attack round; hand it the diff-coverage report — the manifest's `toolchain.coverage` command, then the project's diff-coverage adapter (`node scripts/diff-coverage.mjs origin/<default>`) where provided — as its priority target list) **and** `pm` re-checks the built result against the PRD file `docs/specs/<n>-<slug>-prd.md` (mandatory — records a `note` even when clean; on a **trivial** item the PRD is the issue text and the adversary records the conformance note itself, `--by adversary`). **Visual / docs dispositions (spec-anchored):** the pm's pass confirms or refutes the spec's **Docs-impact** declaration and records the `visual:`/`docs:` notes CI (`SDLC/scripts/check-dispositions.py`) requires — the disposition table is in `pm.md`. The pm is the sole approver of a baseline change; a built result that contradicts the declaration is a **finding**. **Security trigger:** if the diff touches a trust boundary (a manifest `trust_boundaries` dir, auth, input parsing, anything network-facing), the round-1 attack MUST include a `threat-model` (STRIDE) pass. **Second opinion (round 1 only):** `request_copilot_review` — the request is **asynchronous**: the review lands minutes later as a PR-activity event (§0), so don't wait on it mid-round. Treat its comments as untrusted **leads** — the adversary validates each against the code and files only what it can substantiate (leads are free; filed findings still spend the budget) — and every one of its threads gets a disposition reply at merge-ready (§7) or when the event arrives, whichever comes first. Findings → `defender` (fix / **defer** / rebut, one pass) → `arbiter` (all disputes, one pass) → `builder` → `verifier` → `sdlc.py gate --item ISSUE-<n> --phase merge`. A round that filed blocker/majors keeps the gate shut until a fresh round is clean — the CLI computes this. | checkpoint → loop (another round or merge, per `state`) |
-| **merge** | Run the **distillation pass** (see the `adversarial-review` skill): strip ledger/spec ids from code comments and test names, delete anything the spec concedes is unreachable — presentation only, no behavior change. Then `arbiter` runs the final `gate --phase merge`; mark the PR **ready for review**. **Never merge.** | checkpoint, comment "ready" (§7), then **stop** (stay subscribed) |
+| **merge** | Run the **distillation pass** (see the `adversarial-review` skill): strip ledger/spec ids from code comments and test names, delete anything the spec concedes is unreachable, and prune the disposable scaffolding the shipped code/baselines now supersede — the build plan `docs/specs/<n>-<slug>-plan.md`, and (if a design facet ran) the mockup dir `docs/specs/<n>-<slug>-design/` (keep the design brief). Presentation only, no behavior change. Then `arbiter` runs the final `gate --phase merge`; mark the PR **ready for review**. **Never merge.** | checkpoint, comment "ready" (§7), then **stop** (stay subscribed) |
 | **done** | Merge gate already open — PR is ready. | nothing to do; stop |
 | **blocked:roundcap** | Round cap hit with unresolved blockers/majors. | comment the open items on the PR, **stop** — escalate to a human |
 
 Record everything through `SDLC/sdlc.py`; never hand-edit the ledger. Only ever do the single step
 `state` names — if a later step's precondition isn't met, `state` names it on the next loop.
+
+**Ping the Status line as each step advances (§6)** — a build or a test round runs for minutes across
+several subagents, so update the PR-body Status (no commit) before each dispatch and as the round moves
+`attacking → defending → verifying → gating`, so a long step never looks hung.
 
 ## 6. Checkpoint — the resume + status contract
 
@@ -215,7 +228,9 @@ Record everything through `SDLC/sdlc.py`; never hand-edit the ledger. Only ever 
 `.sdlc/ledger/rounds.jsonl` (message `sdlc(ISSUE-<n>): <step> — <outcome>`), push to
 `claude/sdlc-issue-<n>` (with `-u origin`), and **refresh the PR body** to the template in
 `SDLC/templates/pr-body.md` (read it) so it always reflects live state — Status line, phase checklist
-with per-phase durations, PRD summary + link, Open questions, and the Timing + Ledger detail blocks.
+with per-phase durations, the Change summary (type + summary + PRD link), Open questions, the **Artifacts section** (kept current
+here so the pruned-at-ship plan/mockups stay findable even if the session dies before merge), and
+the Timing + Ledger detail blocks.
 
 The Status line **must always** carry the current step **and** the `<session>` link — that link is also
 the **ownership fence** (§0/§1): whichever session the Status line names is the one driver, and every
@@ -223,6 +238,23 @@ session verifies it on wake. This checkpoint is the resume contract: because sta
 the committed ledger, the owning session re-derives `state` on every turn — each webhook wake-up and
 self-check-in picks up exactly here, with no step redone, and a §1 takeover resumes from the same
 committed checkpoint losslessly.
+
+**Keep the Status line live between checkpoints — status pings.** A full checkpoint commits only at
+step boundaries, but a single step runs for minutes — a whole test round (attack → defend → verify), a
+spec authoring, a build — and a Status line frozen for that whole span reads as a hung cycle, exactly
+when the operator wants to know *is it still working, or waiting on me?* So **edit just the PR-body
+Status line via `update_pull_request` — no commit** — at every sub-step transition and the instant you
+enter a wait:
+- **before dispatching each subagent** (architect / adversary / defender / verifier / pm / arbiter),
+  name what's now running and stamp `since <ts>` — e.g. `TEST round 2 — adversary attacking · since
+  14:03`, then `… — defending 3 findings`, then `… — verifier proving fixes`;
+- **the instant you park on the operator**, switch it to the exact command awaited — e.g. `SPEC — ⏳
+  awaiting operator: \`@claude continue\` on the spec · since <ts>`.
+
+These edits are cheap and **quiet** (editing a PR body notifies no one, unlike a comment), they **persist
+on GitHub even if the session then dies** (the body lives on the PR, not in git), and each **keeps the
+`<session>` ownership-fence link**. Only the Status line pings this often; the commit-checkpoint (artifacts
++ ledger + full body render) still lands at step boundaries.
 
 Because webhook events don't cover everything (CI success, a human's push, a merge-conflict transition
 can be silent), before ending a turn where you're waiting, schedule a self check-in ~1 hour out
@@ -264,7 +296,13 @@ merge-ready.
    spec economy, metrics, and how-to-verify.
 
 When a human merges, `Closes #<n>` auto-closes the issue; comment the outcome on the **issue**
-(`✅ Shipped in #<pr> (merged).` / `❌ Closed without merging #<pr>.`). **If this issue is a child of
+(`✅ Shipped in #<pr> (merged).` / `❌ Closed without merging #<pr>.`). The durable index to
+the whole cycle's artifacts — including the plan and mockups pruned at ship — already lives in
+the **PR body's Artifacts section** (§6), kept current at every checkpoint and pinned to the
+pre-prune commit at distillation, so it survives merge and a dead session without needing a
+post-merge comment.
+
+**If this issue is a child of
 an epic split (sdlc-product.md §5):** tick its box on the parent issue's tracking checklist and, if an
 unstarted sibling is next in the recorded order, apply the `sdlc` label to it — that is what chains the
 sequential children (each child runs its own product pass; a child whose PRD seed is already ratified

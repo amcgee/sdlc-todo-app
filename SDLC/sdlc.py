@@ -19,6 +19,7 @@ Usage:
   sdlc.py fix     --ref AUTH-1-F3 --by builder --msg "added 5/min lockout in throttle.py"
   sdlc.py test    --ref AUTH-1-F3 --by verifier --test tests/throttle.test.js::lockout_after_5 \
                   --pre-sha abc123 --post-sha def456 --msg "fails at pre-sha, passes at post-sha; suite green"
+  sdlc.py attest  --ref AUTH-1-F7 --by verifier --file tests/throttle.test.js --msg "test-oracle fix; no behavior changed"   # non-behavioral fix — no proving test possible (--kind comment to name a shipped file)
   sdlc.py verdict --ref AUTH-1-F3 --by arbiter --ruling accepted   # only for REBUTTED findings; accepted=finding valid | rejected=rebuttal wins
   sdlc.py round   --item AUTH-1 --by adversary               # mark the start of an attack round (drives the round cap)
   sdlc.py note    --item AUTH-1 --by pm --msg "PRD conformance: clean"
@@ -85,6 +86,24 @@ def _manifest() -> dict:
             return {}
 
 
+def _shipped_paths() -> tuple[str, ...]:
+    """Production-code path prefixes the build gate protects, via the one shared reader
+    (`manifest.shipped_paths`) with the same env > manifest > default precedence every other
+    consumer uses. Falls back to reading the manifest dict inline when the reader isn't
+    importable (a sandbox holding only sdlc.py). Used by the artifact-only attestation check:
+    a fix that touched a shipped path owes a proving test, never an attestation."""
+    try:
+        sys.path.insert(0, str(BASE / "lib"))
+        import manifest
+        return manifest.shipped_paths()
+    except Exception:
+        env = os.environ.get("SDLC_PROTECTED")
+        if env:
+            return tuple(p for p in env.split(":") if p)
+        paths = _manifest().get("shipped_paths")
+        return tuple(paths) if paths else ("src/", "server/", "worker/", "migrations/")
+
+
 def _ledger_dir() -> Path:
     """The mutable ledger directory, resolved OUTSIDE SDLC/ so the framework stays immutable:
     `SDLC_LEDGER_DIR` env > manifest `ledger_dir` > default `.sdlc/ledger`, a relative value
@@ -112,6 +131,7 @@ ENTRY_ROLES = {
     "defer":   {"defender"},
     "fix":     {"builder", "architect"},   # the architect "fixes" spec-phase findings by revising the spec
     "test":    {"verifier"},
+    "attest":  {"verifier"},               # verifier's artifact-only disposition — see cmd_attest
     "verdict": {"arbiter"},
     # Operator lifecycle controls: only the operator (the human) pauses/resumes/aborts a
     # cycle. Role-checked like every other entry so `doctor` flags e.g. `abort --by adversary`.
@@ -353,6 +373,41 @@ def cmd_test(a):
     print(f"proving test recorded for {a.ref}: {', '.join(a.tests)}")
 
 
+def cmd_attest(a):
+    """The verifier's disposition that a finding's fix changed **no product behavior**, so a
+    fail-then-pass proving test is structurally void — exactly as a spec revision needs none.
+    It resolves the finding like a spec-phase one.
+
+    The proving-test machinery (`spot_check.py`) verifies a fix by checking out the PRE-FIX
+    *code* and proving the named test flips fail→pass across it. That model is defined over
+    fixes that change behavior. When the fix changed none — a test's oracle, a doc, or a
+    comment/docstring inside product code — the test would pass at the pre-fix commit and the
+    claim reads as disproven. Such a fix records an attestation, NOT a fabricated `test` entry.
+
+    Honesty is checkable where it can be. The attestation NAMES the file(s) the fix touched:
+      • files OUTSIDE `shipped_paths` (a test oracle, a doc) — self-evidently non-behavioral;
+        the file location IS the proof, and CI confirms each is a real file.
+      • a comment/docstring change INSIDE `shipped_paths` is also untestable, but 'the diff is
+        comment-only' is not mechanically decidable — so it must be recorded with
+        `--kind comment` (an explicit non-behavioral claim) and CI FLAGS it for the arbiter /
+        human to confirm at merge-ready. A shipped file named WITHOUT `--kind comment` is
+        refused: a behavioral fix owes a proving test.
+
+    (A strengthened test oracle can also be proven for real by a mutation note in --msg — the
+    corrected test fails when the finding's specific weakness is re-introduced — but that needs
+    a mutant the framework doesn't require elsewhere, so the attestation is the floor.)"""
+    _require_role("attest", a.by)
+    if not a.files:
+        sys.exit("an attestation must name the fix's file(s): --file <path> (repeatable) — CI "
+                 "confirms each is a real file, so a bare claim is refused")
+    e = {"type": "attest", "ref": a.ref, "by": a.by, "files": a.files, "msg": a.msg}
+    if getattr(a, "kind", None):
+        e["kind"] = a.kind
+    _append(e)
+    print(f"attestation recorded for {a.ref}: {', '.join(a.files)}"
+          + (f" [kind={a.kind}]" if getattr(a, "kind", None) else ""))
+
+
 def cmd_verdict(a):
     if a.ruling not in ("accepted", "rejected"):
         sys.exit("ruling must be 'accepted' or 'rejected'")
@@ -436,7 +491,7 @@ def _resolve(entries: list[dict], item: str):
     findings = {}
     for e in entries:
         if e.get("type") == "finding" and e.get("item") == item:
-            findings[e["id"]] = {**e, "fixed": False, "tested": False,
+            findings[e["id"]] = {**e, "fixed": False, "tested": False, "attested": False,
                                  "rebutted": False, "deferred": False, "ruling": None}
     for e in entries:
         ref = e.get("ref")
@@ -447,6 +502,8 @@ def _resolve(entries: list[dict], item: str):
             findings[ref]["fixed"] = True
         elif t == "test":
             findings[ref]["tested"] = True
+        elif t == "attest":
+            findings[ref]["attested"] = True
         elif t == "rebut":
             findings[ref]["rebutted"] = True
         elif t == "defer":
@@ -531,12 +588,16 @@ def _gate_status(entries: list[dict], item: str, phase: str | None = None):
         is_spec = (f.get("phase") == "spec"
                    or (spec_open is not None and _epoch(f["ts"]) <= _epoch(spec_open))
                    or (spec_open is None and phase == "spec"))
-        if f["fixed"] and (f["tested"] or is_spec):   # fixed and proven — resolved
+        # Proven when fixed AND one of: a proving test; a spec revision (no test exists for a
+        # document); an artifact-only attestation (the fix touched no product code, so the
+        # fail→pass model is structurally void — cmd_attest). CI checks each attestation is
+        # honest (names real, non-product files) the same way it checks named tests exist.
+        if f["fixed"] and (f["tested"] or is_spec or f["attested"]):   # fixed and proven — resolved
             continue
         if f["rebutted"] and ruling is None:  # disputed, arbiter hasn't ruled
             unresolved.append((fid, f, "awaiting arbiter ruling"))
             continue
-        need = "fix (spec revision)" if is_spec else "fix+test"
+        need = "fix (spec revision)" if is_spec else "fix+test (or an artifact-only attestation)"
         why = f"accepted, awaiting {need}" if ruling == "accepted" else f"awaiting {need}"
         unresolved.append((fid, f, why))
     return findings, unresolved
@@ -633,6 +694,61 @@ def _check_tests_exist(item: str) -> bool:
     return True
 
 
+def _check_attestations(item: str) -> bool:
+    """The mechanical honesty check behind `attest`. A proving test is required exactly when
+    product BEHAVIOR changed — not merely when a shipped file was touched — so the check turns
+    on that, not on file location alone:
+
+      - every named file must EXIST (a phantom file is refused);
+      - a file OUTSIDE `shipped_paths` (a test oracle, a doc) is self-evidently non-behavioral
+        — the location is the proof;
+      - a file INSIDE `shipped_paths` is a comment/docstring change to product code: also
+        untestable, but 'the diff is comment-only' is NOT mechanically decidable, so it must
+        carry `kind: comment` and is FLAGGED (::warning) for the arbiter/human to confirm at
+        merge-ready. A shipped file named without `kind: comment` is REFUSED — a behavioral
+        fix owes a proving test.
+
+    Returns False (fails the gate) only on a hard violation; a flagged comment attestation
+    passes with a warning."""
+    root = BASE.parent
+    shipped = tuple(sp if sp.endswith("/") else sp + "/" for sp in _shipped_paths())
+    bad, flagged = [], []
+    for e in _read():
+        if e.get("type") != "attest":
+            continue
+        ref = e.get("ref", "")
+        if not (ref == item or ref.startswith(item + "-")):
+            continue
+        files = e.get("files") or []
+        if not files:
+            bad.append(f"{ref}: attestation names no file")
+            continue
+        is_comment = e.get("kind") == "comment"
+        for f in files:
+            norm = f.lstrip("./")
+            if not (root / f).is_file():
+                bad.append(f"{ref}: attested file {f!r} does not exist at HEAD")
+            elif any(norm.startswith(sp) for sp in shipped):
+                if is_comment:
+                    flagged.append(f"{ref}: {f} (product file, kind=comment — the arbiter/human "
+                                   f"must confirm the change is non-behavioral)")
+                else:
+                    bad.append(f"{ref}: attested file {f!r} is under a shipped path without "
+                               f"kind=comment — a behavioral fix owes a proving test; a "
+                               f"comment/docstring-only change records `--kind comment`")
+    if bad:
+        print("::error title=arbiter-gate::an attestation names a missing file or an unqualified product file")
+        for b in bad:
+            print("  -", b)
+        return False
+    for fl in flagged:
+        print(f"::warning title=arbiter-gate::comment-only product attestation, confirm non-behavioral — {fl}")
+    print("✅ every attestation names real files"
+          + (f"; {len(flagged)} comment-only product attestation(s) flagged for review" if flagged
+             else ", all non-product"))
+    return True
+
+
 def cmd_verify_gate(a):
     """CI entry point: run every LEDGER-SEMANTIC gate check in one call so the workflow stays a
     thin orchestrator — integrity (`doctor`), append-only (needs `--base`), proving-tests-exist,
@@ -646,6 +762,8 @@ def cmd_verify_gate(a):
         ok = _check_append_only(a.base) and ok
     print("\n== proving tests named in the ledger exist ==")
     ok = _check_tests_exist(a.item) and ok
+    print("\n== artifact-only attestations are non-product ==")
+    ok = _check_attestations(a.item) and ok
     print("\n== MERGE gate ==")
     cmd_status(SimpleNamespace(item=a.item))
     ok = cmd_gate(SimpleNamespace(item=a.item, phase="merge", exit_code=False)) and ok
@@ -664,6 +782,7 @@ def cmd_status(a):
         flags = "".join([
             "F" if f["fixed"] else "-",
             "T" if f["tested"] else "-",
+            "A" if f["attested"] else "-",
             "R" if f["rebutted"] else "-",
             "D" if f["deferred"] else "-",
         ])
@@ -750,6 +869,8 @@ def cmd_doctor(a):
             anomaly(e, f"gate with unknown phase {e.get('phase')!r} on {e.get('item')}")
         if t == "test" and not e.get("tests"):
             anomaly(e, f"test entry on {e.get('ref')} names no --test (unverifiable claim)")
+        if t == "attest" and not e.get("files"):
+            anomaly(e, f"attest entry on {e.get('ref')} names no --file (unverifiable claim)")
         if t == "verdict" and not e.get("forced") and e.get("ref") not in rebutted:
             anomaly(e, f"verdict on {e.get('ref')} has no prior rebut "
                        f"(an undisputed finding stands as filed and needs no ruling)")
@@ -1059,6 +1180,7 @@ def main():
     s = sub.add_parser("defer"); s.add_argument("--ref", required=True); s.add_argument("--by", required=True); s.add_argument("--msg", required=True, help="where the follow-up lives (e.g. 'spun out as issue #12')"); s.set_defaults(fn=cmd_defer)
     s = sub.add_parser("fix"); s.add_argument("--ref", required=True); s.add_argument("--by", required=True); s.add_argument("--msg", required=True); s.set_defaults(fn=cmd_fix)
     s = sub.add_parser("test"); s.add_argument("--ref", required=True); s.add_argument("--by", required=True); s.add_argument("--msg", required=True); s.add_argument("--test", dest="tests", action="append", default=[], help="proving test as <file[::test name]>; repeatable, at least one required"); s.add_argument("--pre-sha", dest="pre_sha", default="", help="commit the test was run against and FAILED (pre-fix)"); s.add_argument("--post-sha", dest="post_sha", default="", help="commit the test was run against and PASSED (post-fix)"); s.set_defaults(fn=cmd_test)
+    s = sub.add_parser("attest", help="verifier disposition: the fix changed no product behavior (a test oracle, a doc, a comment), so a proving test is structurally void; resolves the finding like a spec revision"); s.add_argument("--ref", required=True); s.add_argument("--by", required=True); s.add_argument("--file", dest="files", action="append", default=[], help="a file the fix touched; repeatable, at least one required — CI confirms each exists"); s.add_argument("--kind", choices=("comment",), default=None, help="'comment': assert a non-behavioral comment/docstring change INSIDE product code (required to name a shipped file; flagged for arbiter/human review)"); s.add_argument("--msg", required=True); s.set_defaults(fn=cmd_attest)
     s = sub.add_parser("verdict"); s.add_argument("--ref", required=True); s.add_argument("--by", required=True); s.add_argument("--ruling", required=True); s.add_argument("--msg", default=""); s.add_argument("--force", action="store_true", help="operator override: rule a finding that has no rebuttal (recorded as forced)"); s.set_defaults(fn=cmd_verdict)
     s = sub.add_parser("round"); s.add_argument("--item", required=True); s.add_argument("--by", default="adversary"); s.add_argument("--msg", default=""); s.set_defaults(fn=cmd_round)
     s = sub.add_parser("note"); s.add_argument("--item", required=True); s.add_argument("--by", required=True); s.add_argument("--msg", required=True); s.set_defaults(fn=cmd_note)

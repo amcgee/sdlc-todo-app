@@ -29,14 +29,18 @@ The cycle is **two separate workflows**, each on its own surface with its own ca
 
 When the PRD declares **`Design-impact: yes`** (a new or significantly changed user-facing
 surface), the product loop gains a second artifact: the `designer` agent produces **mockups**
-(self-contained HTML per screen/state, committed with rendered screenshots) and a **design
-brief** (interaction notes; each state marked binding or illustrative). They iterate alongside
-the PRD prose — **asynchronously**: each iteration posts the prose revision immediately and
-renders mockups as a rev-stamped tail, so the operator never waits on pixels — and the same
-`@claude continue` ratifies both. Engineering builds against the brief as **direction, not a
-pixel contract**: the architect anchors the spec's `visual:` declarations on its binding
-states, and the pm's TEST conformance pass checks the built screenshots against them.
-Mechanics live in the product driver (§3b) and [designer.md](../../.claude/agents/designer.md).
+(self-contained HTML for the binding states, in the product's primary theme, committed with
+rendered screenshots) and a **design brief** (interaction notes; each state marked binding or
+illustrative). They iterate alongside the PRD prose — **asynchronously**:
+each iteration posts the prose revision immediately and renders mockups as a rev-stamped tail,
+so the operator never waits on pixels — and the same `@claude continue` ratifies both.
+Engineering builds against the brief as **direction, not a pixel contract**: the architect
+anchors the spec's `visual:` declarations on its binding states, and the pm's TEST conformance
+pass checks the built screenshots against them. The mockups are **pre-build scaffolding**:
+once the pm has confirmed the built result, the merge distillation pass prunes them and the
+shipped UI's own visual baselines become the living record — only the terse brief is kept
+frozen. Mechanics live in the product driver (§3b) and
+[designer.md](../../.claude/agents/designer.md).
 
 ## Sizing — the pipeline is priced per issue
 
@@ -84,12 +88,13 @@ the adversarial engineering workflow on the PR, where each **gate** is a hard st
    for users, not how), asking the operator until they approve. May embed high-level
    architectural direction only where it's critical to the feature. Gate: `@claude continue` —
    the ratifying session opens the PR and continues into engineering.
-2. **SPEC** — `architect` writes the technical spec **and** implementation plan in one document
-   from the ratified PRD. `adversary` attacks it both for correctness (ambiguity, missing
-   requirements, untestable claims) **and for economy** — duplication, implementation-transcription,
-   PRD re-derivation, over-budget length — so the loop can *remove* spec, not only add it; the
-   `spec economy` ratio (advisory) makes the proportion visible. Gate: spec ratified (the only human
-   checkpoint in engineering).
+2. **SPEC** — `architect` writes two files from the ratified PRD, split by half-life: the
+   durable **contract** (`-spec.md`, what & why — kept frozen) and the disposable **build plan**
+   (`-plan.md`, the how — pruned at ship, since the code supersedes it). `adversary` attacks both
+   for correctness (ambiguity, missing requirements, untestable claims) **and for economy** —
+   duplication, implementation-transcription, PRD re-derivation, over-budget length — so the loop
+   can *remove* spec, not only add it; the `spec economy` ratio (advisory) makes the proportion
+   visible. Gate: spec ratified (the only human checkpoint in engineering).
 3. **BUILD** — `builder` implements the ratified spec. Nothing else.
 4. **ATTACK** — `adversary` red-teams the implementation and files **findings** (severity:
    blocker / major / minor / nit; budget `finding_budget` in `SDLC/constants.json`, ranked — rejected
@@ -113,7 +118,13 @@ the adversarial engineering workflow on the PR, where each **gate** is a hard st
    ledger entry names the test and both commits; CI checks the named tests exist **and
    re-executes the claim** (`SDLC/lib/spot_check.py` re-runs them at the recorded pre-fix
    commit — a test that passes there is a disproven claim and fails the gate). A fix
-   without a proving test does not count.
+   without a proving test does not count — **except a non-behavioral fix** (a test oracle,
+   a doc, a comment: behavior unchanged, so the fail→pass model is structurally void), which
+   is proven by an **attestation** (`attest`) naming the files touched. CI confirms each
+   file exists; a file outside `shipped_paths` stands on that, while a comment/docstring
+   change *inside* product code takes `--kind comment` and is flagged for the arbiter/human
+   to confirm non-behavioral (a shipped file without it is refused — a behavioral fix owes a
+   test). This is the same "resolved by revision alone" carve-out the spec phase already has.
 7. **MERGE** — `arbiter` opens the gate only when there are **zero unresolved
    blockers/majors**, every fix has a proving test, and the **latest round is clean**.
 
@@ -127,7 +138,7 @@ survives with none, so fixes are always themselves attacked before release.
 Every consequential event is appended to the append-only record `.sdlc/ledger/rounds.jsonl` — the
 single source of truth. It lives outside `SDLC/` (configurable via the manifest's `ledger_dir`)
 so the framework directory stays immutable. Agents may not claim a gate is satisfied; they point at ledger entries
-that prove it. Entry types: `open`, `finding`, `rebut`, `defer`, `fix`, `test`, `verdict`,
+that prove it. Entry types: `open`, `finding`, `rebut`, `defer`, `fix`, `test`, `attest`, `verdict`,
 `round`, `note`, `gate`. Because the record is authoritative, the current position in the
 cycle is a pure function of it (`sdlc.py state`), which makes the pipeline resumable.
 

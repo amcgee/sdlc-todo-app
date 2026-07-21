@@ -67,7 +67,12 @@ whether the round was clean. This is the core loop of the adversarial SDLC.
 4. **Fix & prove.** For each finding routed to fix: `builder` fixes (staying inside the
    plan's files-to-touch, or getting an arbiter ruling first), then `verifier` proves it —
    runs the new test at the pre-fix commit (FAIL) and post-fix (PASS) and records it with
-   `--test file[::name]` plus both SHAs. CI checks the named tests exist.
+   `--test file[::name]` plus both SHAs. CI checks the named tests exist. **A fix that
+   changed no behavior** (a test oracle, a doc, a comment/docstring — so no fail→pass test
+   can exist) is proven by an **attestation** instead: `sdlc.py attest --ref <F-id> --by
+   verifier --file <path>` naming every file touched. A file outside `shipped_paths` stands
+   on its location; a comment-only change *inside* product code takes `--kind comment` and is
+   flagged for arbiter/human confirmation (see `verifier.md`).
 
 5. **Gate.** Run:
    ```
@@ -98,3 +103,16 @@ The pass covers **docs the diff touched** too: condense rather than append (net 
 growth needs a reason), and fold rationale into the ledger, not the page. Distillation
 touches presentation only — if it wants to change behavior, that's a finding, not a
 cleanup.
+
+**Prune disposable scaffolding.** By merge-ready, the shipped code and its baselines supersede
+the per-cycle "how" artifacts — delete them so they don't rot in the tree, keeping only the
+durable "what/why":
+- the **build plan** `docs/specs/<n>-<slug>-plan.md` — the code is now the authoritative how
+  (keep the durable contract `-spec.md`);
+- if a design facet ran, the **mockup dir** `docs/specs/<n>-<slug>-design/` (HTML + PNGs) — the
+  shipped UI's visual baselines (`docs.screenshots`) are the living record now (keep the terse
+  **design brief** `-design.md` as the frozen rationale).
+
+Both had done their whole job by here: the operator approved them, the builder built to them,
+the adversary/pm reviewed against them. The issue's mockup comments still resolve — their image
+URLs are pinned to the commit that added them, not to HEAD.

@@ -70,6 +70,93 @@ def test_verify_gate_fails_on_ledger_deletion():
         assert "append-only" in r.stdout
 
 
+# ---- artifact-only attestation (a fix a proving test structurally can't cover) --------------
+
+def _ledger_with_finding(resolution: list[dict]):
+    """A merge-ready-shaped ledger with one blocker finding whose resolution is `resolution`
+    (the fix + whichever proving disposition the test is exercising). A round filing a blocker
+    is dirty until a fresh clean round surveys the fix, so the fixture closes with a second,
+    empty round — exactly what a real re-attack round does."""
+    lines = [
+        {"type": "open", "item": "IT-1", "title": "t", "size": "standard"},
+        {"type": "gate", "item": "IT-1", "phase": "spec", "result": "open"},
+        {"type": "gate", "item": "IT-1", "phase": "build", "result": "open"},
+        {"type": "round", "item": "IT-1", "by": "adversary"},
+        {"type": "finding", "id": "IT-1-F1", "item": "IT-1", "sev": "blocker",
+         "by": "adversary", "msg": "weak test oracle", "state": "open"},
+        *resolution,
+        {"type": "round", "item": "IT-1", "by": "adversary"},   # clean re-attack round
+    ]
+    for i, l in enumerate(lines):
+        l["ts"] = f"2026-07-06T00:{i:02d}:00Z"
+    return "".join(json.dumps(l) + "\n" for l in lines)
+
+
+def _attest_sandbox(tmp, resolution, files):
+    repo = sandbox.make_repo(tmp, rounds_text=_ledger_with_finding(resolution),
+                             files=files, commit=True)
+    return repo, sandbox.head(repo)
+
+
+def test_attest_resolves_a_test_only_fix():
+    # A fix entirely in tests/ resolves the finding via `attest` — no fabricated proving test,
+    # and the merge gate opens.
+    with tempfile.TemporaryDirectory() as d:
+        resolution = [
+            {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "rewrote the oracle"},
+            {"type": "attest", "ref": "IT-1-F1", "by": "verifier",
+             "files": ["tests/todos.test.js"], "msg": "test-only; no product code changed"},
+        ]
+        repo, base = _attest_sandbox(Path(d), resolution, {"tests/todos.test.js": "// oracle\n"})
+        r = _run(repo, "--item", "IT-1", "--base", base)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "all ledger checks passed" in r.stdout
+
+
+def test_attest_product_file_without_kind_comment_fails_the_gate():
+    # A shipped file named without `kind: comment` reads as a behavioral product fix — which
+    # owes a real proving test. CI must refuse it.
+    with tempfile.TemporaryDirectory() as d:
+        resolution = [
+            {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "touched product code"},
+            {"type": "attest", "ref": "IT-1-F1", "by": "verifier",
+             "files": ["src/App.jsx"], "msg": "no kind — reads as a behavioral fix"},
+        ]
+        repo, base = _attest_sandbox(Path(d), resolution, {"src/App.jsx": "// product\n"})
+        r = _run(repo, "--item", "IT-1", "--base", base)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "without kind=comment" in r.stdout
+
+
+def test_attest_comment_only_in_shipped_code_passes_with_flag():
+    # A comment/docstring-only fix INSIDE product code is untestable too — allowed with an
+    # explicit `kind: comment`, passing the gate but flagged for arbiter/human confirmation.
+    with tempfile.TemporaryDirectory() as d:
+        resolution = [
+            {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "fixed a misleading comment"},
+            {"type": "attest", "ref": "IT-1-F1", "by": "verifier", "kind": "comment",
+             "files": ["src/App.jsx"], "msg": "comment-only; no behavior changed"},
+        ]
+        repo, base = _attest_sandbox(Path(d), resolution, {"src/App.jsx": "// product\n"})
+        r = _run(repo, "--item", "IT-1", "--base", base)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "all ledger checks passed" in r.stdout
+        assert "flagged for review" in r.stdout
+
+
+def test_attest_naming_missing_file_fails_the_gate():
+    with tempfile.TemporaryDirectory() as d:
+        resolution = [
+            {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "fix"},
+            {"type": "attest", "ref": "IT-1-F1", "by": "verifier",
+             "files": ["tests/ghost.test.js"], "msg": "names a file that isn't there"},
+        ]
+        repo, base = _attest_sandbox(Path(d), resolution, {})  # no such file committed
+        r = _run(repo, "--item", "IT-1", "--base", base)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "does not exist" in r.stdout
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

@@ -10,7 +10,8 @@ review the spec for duplication / implementation-transcription / PRD re-derivati
 a target.
 
 Counts, between --base and HEAD:
-  spec+PRD     lines of docs/specs/<n>-*.md (the PRD + the spec/plan)
+  spec+PRD     lines of docs/specs/<n>-*.md (the PRD, the spec contract, the build plan, and
+               any design brief — every per-cycle .md; the plan/mockups are pruned at ship)
   code         net-added lines under the manifest's `shipped_paths` (else the built-in
                default) — production code only
   tests        net-added lines under tests/ (reported for context, not in the ratio)
