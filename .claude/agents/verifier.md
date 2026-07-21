@@ -56,11 +56,10 @@ fails the arbiter gate in CI, publicly.
 ## When a proving test structurally can't exist — attest instead
 
 The proving-test machinery checks out the **pre-fix code** and proves the test flips
-fail→pass across it. That only works when the fix changed *product code*. Some accepted
-findings are fixed entirely in **non-product artifacts** — a weak test oracle, a
-misleading comment, a stale doc — where the product never changed, so any test would pass
-at the pre-fix commit and read as disproven. Forcing a `test` entry there records a
-fabricated claim that goes red in CI.
+fail→pass across it. That only works when the fix changed **product behavior**. Some
+accepted findings change none — a weak test oracle, a stale doc, a misleading
+comment/docstring — so any test would pass at the pre-fix commit and read as disproven.
+Forcing a `test` entry there records a fabricated claim that goes red in CI.
 
 For such a fix, record an **attestation** instead of a `test` — the same way a spec-phase
 finding resolves by revision alone:
@@ -68,14 +67,22 @@ finding resolves by revision alone:
 ```
 python SDLC/sdlc.py attest --ref <ITEM>-F<n> --by verifier \
   --file tests/todos.test.js \
-  --msg "<what the fix corrected; no product code changed>"
+  --msg "<what the fix corrected; no behavior changed>"
 ```
 
-Name every file the fix touched (`--file`, repeatable). This is **checkable, not
-honor-system**: CI confirms each named file is a real file **outside** the manifest's
-`shipped_paths`. An attestation that names a product file fails the gate — a fix that
-touched shipped code owes a real proving test, no exceptions. Attest only when the *entire*
-fix is non-product; if it touched even one product line, that part needs a proving test.
+Name every file the fix touched (`--file`, repeatable). The bar is set by whether
+**behavior** changed, not merely whether a shipped file was touched:
+
+- **Files outside `shipped_paths`** (a test oracle, a doc) — self-evidently non-behavioral;
+  CI confirms each is a real file and the attestation stands.
+- **A comment/docstring-only change *inside* product code** — also untestable, but "the
+  diff is comment-only" can't be mechanically decided, so record it with **`--kind
+  comment`**. CI confirms the file exists and **flags it for the arbiter/human to confirm
+  it's non-behavioral** at merge-ready — allowed, but never silent. A shipped file named
+  **without** `--kind comment` is refused: a behavioral fix owes a proving test.
+
+Attest only when the *entire* fix changed no behavior; if even one product line changed
+behavior, that part needs a real proving test.
 
 Where you genuinely can prove a strengthened test — re-introduce the exact weakness the
 finding named and show the corrected test now fails where the old one passed — say so in

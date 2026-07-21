@@ -113,11 +113,13 @@ the adversarial engineering workflow on the PR, where each **gate** is a hard st
    ledger entry names the test and both commits; CI checks the named tests exist **and
    re-executes the claim** (`SDLC/lib/spot_check.py` re-runs them at the recorded pre-fix
    commit — a test that passes there is a disproven claim and fails the gate). A fix
-   without a proving test does not count — **except an artifact-only fix** (a test oracle,
-   a doc, a comment: no product code changed, so the fail→pass model is structurally void),
-   which is proven by an **attestation** (`attest`) naming the files touched; CI confirms
-   each is outside `shipped_paths`, exactly as it confirms named tests exist. This is the
-   same "resolved by revision alone" carve-out the spec phase already has.
+   without a proving test does not count — **except a non-behavioral fix** (a test oracle,
+   a doc, a comment: behavior unchanged, so the fail→pass model is structurally void), which
+   is proven by an **attestation** (`attest`) naming the files touched. CI confirms each
+   file exists; a file outside `shipped_paths` stands on that, while a comment/docstring
+   change *inside* product code takes `--kind comment` and is flagged for the arbiter/human
+   to confirm non-behavioral (a shipped file without it is refused — a behavioral fix owes a
+   test). This is the same "resolved by revision alone" carve-out the spec phase already has.
 7. **MERGE** — `arbiter` opens the gate only when there are **zero unresolved
    blockers/majors**, every fix has a proving test, and the **latest round is clean**.
 

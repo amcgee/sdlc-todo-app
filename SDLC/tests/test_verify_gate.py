@@ -113,19 +113,35 @@ def test_attest_resolves_a_test_only_fix():
         assert "all ledger checks passed" in r.stdout
 
 
-def test_attest_naming_product_file_fails_the_gate():
-    # An attestation that points at a shipped path is dishonest — a fix touching product code
+def test_attest_product_file_without_kind_comment_fails_the_gate():
+    # A shipped file named without `kind: comment` reads as a behavioral product fix — which
     # owes a real proving test. CI must refuse it.
     with tempfile.TemporaryDirectory() as d:
         resolution = [
             {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "touched product code"},
             {"type": "attest", "ref": "IT-1-F1", "by": "verifier",
-             "files": ["src/App.jsx"], "msg": "claims artifact-only but isn't"},
+             "files": ["src/App.jsx"], "msg": "no kind — reads as a behavioral fix"},
         ]
         repo, base = _attest_sandbox(Path(d), resolution, {"src/App.jsx": "// product\n"})
         r = _run(repo, "--item", "IT-1", "--base", base)
         assert r.returncode == 1, r.stdout + r.stderr
-        assert "under a shipped path" in r.stdout
+        assert "without kind=comment" in r.stdout
+
+
+def test_attest_comment_only_in_shipped_code_passes_with_flag():
+    # A comment/docstring-only fix INSIDE product code is untestable too — allowed with an
+    # explicit `kind: comment`, passing the gate but flagged for arbiter/human confirmation.
+    with tempfile.TemporaryDirectory() as d:
+        resolution = [
+            {"type": "fix", "ref": "IT-1-F1", "by": "builder", "msg": "fixed a misleading comment"},
+            {"type": "attest", "ref": "IT-1-F1", "by": "verifier", "kind": "comment",
+             "files": ["src/App.jsx"], "msg": "comment-only; no behavior changed"},
+        ]
+        repo, base = _attest_sandbox(Path(d), resolution, {"src/App.jsx": "// product\n"})
+        r = _run(repo, "--item", "IT-1", "--base", base)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "all ledger checks passed" in r.stdout
+        assert "flagged for review" in r.stdout
 
 
 def test_attest_naming_missing_file_fails_the_gate():

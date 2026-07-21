@@ -10,8 +10,8 @@ properties that make it more than a log: it is a **resumable state machine** and
 
 Each line is a self-contained, timestamped record. Types: `open` (work item; carries `size`
 trivial/standard/epic, which drives the workflows' path but never the gate math), `finding`, `rebut`,
-`defer` (a minor/nit parked as follow-up work), `fix`, `test`, `attest` (an artifact-only fix's proof —
-tests/docs/comments, where no fail→pass test can exist), `verdict`, `round`, `note` (a recorded
+`defer` (a minor/nit parked as follow-up work), `fix`, `test`, `attest` (a non-behavioral fix's proof —
+a test oracle, doc, or comment, where no fail→pass test can exist), `verdict`, `round`, `note` (a recorded
 observation, e.g. the pm's PRD-conformance result), `gate`, and `await` (a marker that the cycle is
 blocked on operator input, so `sdlc.py timing` can keep that wait out of a phase's active duration).
 
