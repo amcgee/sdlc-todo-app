@@ -28,13 +28,13 @@ Every per-cycle document, **always listed and always current** — refreshed at 
 so the index is in place even if the session dies before the human merges. The disposable ones
 (plan, mockups) are pruned at ship; their links then resolve to a permalink pinned to the commit
 before the prune (see the note below). Show every row: link it once the file exists, or say
-`— not yet` / `— none (no design facet)` so the reader always knows the full set.
+`— not yet` / `— none (no design impact)` so the reader always knows the full set.
 
 - 📋 **PRD** — <[Product requirements](link to `docs/specs/<n>-<slug>-prd.md`)>
-- 🎨 **Design brief** — <[Design & interaction notes](link to `docs/specs/<n>-<slug>-design.md`) · or `none (no design facet)`>
+- 🎨 **Design brief** — <[Design & interaction notes](link to `docs/specs/<n>-<slug>-design.md`) · or `none (no design impact)`>
 - 📐 **Spec** — <[Technical contract](link to `docs/specs/<n>-<slug>-spec.md`) · or `not yet`>
 - 🛠️ **Plan** *(pruned at ship)* — <[Implementation plan](link to `docs/specs/<n>-<slug>-plan.md`) · or `not yet`>
-- 🖼️ **Mockups** *(pruned at ship)* — <[Mockup gallery](link to the `docs/specs/<n>-<slug>-design/` dir) · or `none (no design facet)`>
+- 🖼️ **Mockups** *(pruned at ship)* — <[Mockup gallery](link to the `docs/specs/<n>-<slug>-design/` dir) · or `none (no design impact)`>
 
 <details><summary>Timing — more info</summary>
 
