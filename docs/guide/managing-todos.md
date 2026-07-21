@@ -16,6 +16,27 @@ whitespace-only text is ignored (the field clears, nothing is added).
 Click an item's **checkbox** to toggle it. Completed items show struck-through, muted
 text and stop counting toward **“N items left”** (the counter counts active items only).
 
+## Reorder
+
+Give your list a priority order by moving items up or down. Each row has a **drag
+handle** in the left gutter — a 6-dot grip that appears when you hover the row or focus
+any of its controls. Grab it and drag the item to a new spot; a line shows where it will
+land, and the row you left keeps a dashed placeholder until you drop.
+
+![Animation: focusing a row's drag handle, then moving the item down a position with the keyboard](../screenshots/reordering.gif)
+
+- **Keyboard.** Tab to the handle (it is the first control in each row) and press **↑**
+  or **↓** to move the item one position at a time. Focus stays on the item as it moves,
+  and each move is announced — *"&lt;item&gt; moved to position 2 of 3."* At the top or
+  bottom the key does nothing and says so.
+- **Where it works.** Reordering applies only in the **All** view with the default
+  (manual) order. Apply an **Active/Completed** filter or turn on **Sort by date** and the
+  handle dims and stops responding — those views show a subset or a derived order, so
+  "move to any position" has no stored meaning there. Return to **All** with sort off and
+  your manual order is exactly as you left it.
+- **Persistence.** The new order saves with the same whole-list save as every other
+  change, so it survives a reload.
+
 ## Edit
 
 Start an edit by **double-clicking the item's text** or clicking its **Edit** button.

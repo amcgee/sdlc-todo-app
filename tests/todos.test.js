@@ -31,6 +31,8 @@ import {
   isOverdue,
   sortByDueDate,
   dueDateLabel,
+  moveTodo,
+  pointerDropIndex,
 } from '../src/todos.js';
 
 // ---------------------------------------------------------------------------
@@ -808,4 +810,115 @@ test('R1/R10/F8: exported functions are deterministic (twice-called -> deep-equa
   for (const call of calls) {
     expect(call()).toEqual(call());
   }
+});
+
+// ===========================================================================
+// moveTodo (R1 / INV-PERMUTATION) — remove-then-insert, clamp, same-ref no-op
+// ===========================================================================
+
+/** The R1 oracle list, [A,B,C,D] keyed by id. */
+function abcd() {
+  return [
+    { id: 'A', text: 'alpha', completed: false },
+    { id: 'B', text: 'bravo', completed: true },
+    { id: 'C', text: 'charlie', completed: false },
+    { id: 'D', text: 'delta', completed: true },
+  ];
+}
+
+test('moveTodo: A -> 2 lands the item at its final index (B,C,A,D)', () => {
+  const next = moveTodo(abcd(), 'A', 2);
+  expect(next.map((t) => t.id)).toEqual(['B', 'C', 'A', 'D']);
+});
+
+test('moveTodo: D -> 0 moves to the front (D,A,B,C)', () => {
+  const next = moveTodo(abcd(), 'D', 0);
+  expect(next.map((t) => t.id)).toEqual(['D', 'A', 'B', 'C']);
+});
+
+test('moveTodo: B -> 1 is a no-op and returns the SAME list reference', () => {
+  const list = abcd();
+  const next = moveTodo(list, 'B', 1);
+  expect(next).toBe(list); // same ref -> no redundant PUT
+});
+
+test('moveTodo: C -> 99 clamps to the last index (A,B,D,C)', () => {
+  const next = moveTodo(abcd(), 'C', 99);
+  expect(next.map((t) => t.id)).toEqual(['A', 'B', 'D', 'C']);
+});
+
+test('moveTodo: negative toIndex clamps to the front', () => {
+  const next = moveTodo(abcd(), 'C', -5);
+  expect(next.map((t) => t.id)).toEqual(['C', 'A', 'B', 'D']);
+});
+
+test('moveTodo: an absent id returns the SAME list reference', () => {
+  const list = abcd();
+  const next = moveTodo(list, 'X', 1);
+  expect(next).toBe(list);
+});
+
+test('moveTodo: a clamped destination equal to the current index is a same-ref no-op', () => {
+  const list = abcd();
+  // D is already last (index 3 in a 4-item list); toIndex 99 clamps down to 3 — D's
+  // own current index — so the clamped move must still be a same-ref no-op.
+  const next = moveTodo(list, 'D', 99);
+  expect(next).toBe(list);
+});
+
+test('moveTodo: never mutates its input (frozen list)', () => {
+  const list = deepFreeze(abcd());
+  expect(() => moveTodo(list, 'A', 3)).not.toThrow();
+  expect(list.map((t) => t.id)).toEqual(['A', 'B', 'C', 'D']); // untouched
+});
+
+test('moveTodo: INV-PERMUTATION — preserves length, id multiset, and every field', () => {
+  const before = abcd();
+  const after = moveTodo(before, 'B', 3);
+  expect(after).toHaveLength(before.length);
+  expect([...after.map((t) => t.id)].sort()).toEqual(
+    [...before.map((t) => t.id)].sort()
+  );
+  // Each moved item is the same object shape, no field edited.
+  for (const item of before) {
+    expect(after.find((t) => t.id === item.id)).toEqual(item);
+  }
+});
+
+// ===========================================================================
+// pointerDropIndex (R4 geometry) — rects + pointer Y -> { gap, toIndex }
+// ===========================================================================
+
+/** Four contiguous 50px-tall row bands: row k spans [k*50, k*50+50). */
+function bands(n = 4) {
+  return Array.from({ length: n }, (_, k) => ({ top: k * 50, bottom: k * 50 + 50 }));
+}
+
+test('pointerDropIndex: A down, pointer over row C lower half -> gap 3, toIndex 2', () => {
+  // origin i=0; row C is r=2 ([100,150)), lower half is y>=125.
+  expect(pointerDropIndex(bands(), 140, 0)).toEqual({ gap: 3, toIndex: 2 });
+});
+
+test('pointerDropIndex: D up, pointer over row A upper half -> gap 0, toIndex 0', () => {
+  // origin i=3; row A is r=0 ([0,50)), upper half is y<25.
+  expect(pointerDropIndex(bands(), 10, 3)).toEqual({ gap: 0, toIndex: 0 });
+});
+
+test('pointerDropIndex: over the origin row, either half maps to toIndex === origin (no-op)', () => {
+  // origin i=0 over row A: upper half -> gap 0, lower half -> gap 1, both toIndex 0.
+  expect(pointerDropIndex(bands(), 10, 0)).toEqual({ gap: 0, toIndex: 0 });
+  expect(pointerDropIndex(bands(), 40, 0)).toEqual({ gap: 1, toIndex: 0 });
+});
+
+test('pointerDropIndex: pointer above the list clamps to gap 0', () => {
+  expect(pointerDropIndex(bands(), -20, 2)).toEqual({ gap: 0, toIndex: 0 });
+});
+
+test('pointerDropIndex: pointer below the list clamps to gap N (append)', () => {
+  // origin i=0, gap 4 > i so toIndex = 3 (the last resting index after removal).
+  expect(pointerDropIndex(bands(), 999, 0)).toEqual({ gap: 4, toIndex: 3 });
+});
+
+test('pointerDropIndex: an empty band list returns the origin unchanged', () => {
+  expect(pointerDropIndex([], 100, 2)).toEqual({ gap: 0, toIndex: 2 });
 });

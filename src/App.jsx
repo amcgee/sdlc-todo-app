@@ -23,6 +23,8 @@ import {
   isOverdue,
   sortByDueDate,
   dueDateLabel,
+  moveTodo,
+  pointerDropIndex,
 } from './todos.js';
 import { loadTodos, saveTodos } from './storage.js';
 import { MAX_ITEM_CHARS, MAX_LIST_ITEMS, itemCharCount } from './limits.js';
@@ -79,7 +81,17 @@ export default function App() {
   const [editDueDate, setEditDueDate] = useState(''); // staged date draft (ISSUE-40-F13)
   const [notice, setNotice] = useState(null); // non-silent limit / save-failure message (R4/R5/R10/R13)
   const [pendingUndo, setPendingUndo] = useState(null); // { entries, label } | null — the single live undo
+  const [announcement, setAnnouncement] = useState(null); // { text, seq } | null — the live move message
+  const [dragState, setDragState] = useState(null); // active pointer drag descriptor | null
+  const [focusedReorderId, setFocusedReorderId] = useState(null); // id of the focused drag handle
+  const [settleId, setSettleId] = useState(null); // id of the just-landed row (brief highlight)
   const undoTimerRef = useRef(null); // setTimeout id for the 5s undo window
+  const announceSeqRef = useRef(0); // monotonic nonce so a repeated identical move message re-announces
+  const settleTimerRef = useRef(null); // setTimeout id clearing the settle highlight
+  const rowRefs = useRef(new Map()); // id -> row <li> element, for reading drag geometry
+  const ulRef = useRef(null); // the list <ul>, the positioning context for drag overlays
+  const dragGeomRef = useRef(null); // row bands snapshot captured at pointerdown for the active drag
+  const latestOrderRef = useRef([]); // newest committed/intended list order — the reorder handlers' source of truth
   const seqRef = useRef(0);
   const hydratedRef = useRef(false); // authoritative gate (read sync in save effect)
   const skipNextSaveRef = useRef(false); // suppress the load-applied echo (D2 step 3)
@@ -95,6 +107,10 @@ export default function App() {
       undoTimerRef.current = null;
     }
     setPendingUndo(null);
+    // The live region is single-tenant: finalizing undo (an add/toggle/edit/delete/
+    // clear/undo just wrote it) evicts any lingering move announcement so a move
+    // message never outlives a later unrelated action.
+    setAnnouncement(null);
   }
 
   // Arm a fresh 5s pending undo, first clearing any prior one (at most one at a time).
@@ -104,7 +120,158 @@ export default function App() {
     }
     setPendingUndo({ entries, label });
     setNotice(null);
+    setAnnouncement(null); // arming undo writes the region -> evict any move message
     undoTimerRef.current = setTimeout(finalizeUndo, 5000);
+  }
+
+  // Surface a non-silent notice AND evict any move announcement (the region shows one
+  // at a time). Plain setNotice(null) calls do NOT evict — only a real message does.
+  function showNotice(message) {
+    setNotice(message);
+    setAnnouncement(null);
+  }
+
+  // Announce a completed (or end-of-list no-op) move in the existing live region (R5).
+  // The move message is mutually exclusive with notice/undo: it finalizes any pending
+  // undo and clears the notice. The monotonic seq nonce (surfaced as data-announce-seq,
+  // and used to key the text node) forces re-announcement of identical repeated copy —
+  // e.g. ArrowUp twice at the top emits the same words but re-renders each press.
+  function announceMove(text) {
+    finalizeUndo();
+    setNotice(null);
+    announceSeqRef.current += 1;
+    setAnnouncement({ text, seq: announceSeqRef.current });
+  }
+
+  // Briefly highlight the row that just landed after a move (drag or keyboard).
+  function markSettled(id) {
+    if (settleTimerRef.current !== null) clearTimeout(settleTimerRef.current);
+    setSettleId(id);
+    settleTimerRef.current = setTimeout(() => {
+      setSettleId(null);
+      settleTimerRef.current = null;
+    }, 600);
+  }
+
+  // Keyboard reorder (R3): ArrowUp/Down moves the item one stored position immediately
+  // (no pick-up mode). Focus rides along because the handle is keyed by todo.id, so
+  // React moves the same DOM node and the browser keeps it focused. Inert outside a
+  // reorderable context (R2). At an end the key is a no-op with a top/bottom message.
+  function handleReorderKeyDown(e, id) {
+    if (!reorderable) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    // Decide every branch — boundary vs. move, the target, and the announcement —
+    // against the newest order, not the render-scope closure. `latestOrderRef` holds
+    // the committed order and is advanced below the moment a move is computed, so a
+    // second key event in the same batch (before React re-renders) sees the first
+    // move's result: it can't falsely report "already at the top/bottom" for an item
+    // an earlier event just moved past, and the announcement always matches the order
+    // that actually commits.
+    const base = latestOrderRef.current;
+    const index = base.findIndex((t) => t.id === id);
+    if (index === -1) return;
+    const item = base[index];
+    const target = index + (e.key === 'ArrowUp' ? -1 : 1);
+    if (target < 0) {
+      announceMove(`${item.text} is already at the top.`);
+      return;
+    }
+    if (target > base.length - 1) {
+      announceMove(`${item.text} is already at the bottom.`);
+      return;
+    }
+    // The next list is a fully-composed absolute order (computed on top of `base`),
+    // so advancing the ref and committing it directly still composes rapid batched
+    // moves — each event builds on the prior one instead of dropping it.
+    const next = moveTodo(base, id, target);
+    latestOrderRef.current = next;
+    setTodos(next);
+    announceMove(`${item.text} moved to position ${target + 1} of ${next.length}.`);
+    markSettled(id);
+  }
+
+  // Snapshot the rendered row bands + list offset at drag start and map a pointer Y to
+  // the drop target + overlay positions. Reading the bands ONCE (not live during the
+  // drag) keeps the geometry stable while the lifted row transforms — the DOM order
+  // does not change until pointerup and the overlays are absolutely positioned, so the
+  // captured rects stay valid. Returns null if the snapshot is missing.
+  function computeDrag(id, originIndex, clientY) {
+    const geom = dragGeomRef.current;
+    if (!geom) return null;
+    const { rects, ulTop, startY } = geom;
+    const { gap, toIndex } = pointerDropIndex(rects, clientY, originIndex);
+    const n = rects.length;
+    const indicatorTop = (gap < n ? rects[gap].top : rects[n - 1].bottom) - ulTop;
+    const origin = rects[originIndex];
+    return {
+      id,
+      originIndex,
+      gap,
+      toIndex,
+      liftOffset: clientY - startY,
+      indicatorTop,
+      placeholderTop: origin.top - ulTop,
+      placeholderHeight: origin.bottom - origin.top,
+    };
+  }
+
+  function handleReorderPointerDown(e, id) {
+    if (!reorderable) return; // disabled context: dragging is not offered (R2)
+    if (e.pointerType === 'mouse' && e.button !== 0) return; // primary button only
+    const originIndex = todos.findIndex((t) => t.id === id);
+    if (originIndex === -1) return;
+    const ul = ulRef.current;
+    if (!ul) return;
+    const ulTop = ul.getBoundingClientRect().top;
+    const rects = [];
+    for (const todo of visible) {
+      const el = rowRefs.current.get(todo.id);
+      if (!el) return; // can't measure a row -> don't start a drag we can't map
+      const r = el.getBoundingClientRect();
+      rects.push({ top: r.top, bottom: r.bottom });
+    }
+    dragGeomRef.current = { rects, ulTop, startY: e.clientY };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDragState(computeDrag(id, originIndex, e.clientY));
+  }
+
+  function handleReorderPointerMove(e) {
+    if (!dragState) return;
+    const next = computeDrag(dragState.id, dragState.originIndex, e.clientY);
+    if (next) setDragState(next);
+  }
+
+  function handleReorderPointerUp(e) {
+    const drag = dragState;
+    dragGeomRef.current = null;
+    setDragState(null);
+    try {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    } catch {
+      // capture may already be gone; nothing to release
+    }
+    if (!drag) return;
+    // Resolve against the newest order (see the keyboard handler): the same ref that
+    // survives an un-rendered batch drives the origin check, the no-op guard, and the
+    // announcement, so a drop landing after another reorder in the same batch can't
+    // announce a stale item/position or drop the earlier move.
+    const base = latestOrderRef.current;
+    const index = base.findIndex((t) => t.id === drag.id);
+    if (index === -1) return;
+    if (drag.toIndex === index) return; // dropped back on its origin -> no move, no PUT (R4)
+    const item = base[index];
+    const next = moveTodo(base, drag.id, drag.toIndex);
+    latestOrderRef.current = next;
+    setTodos(next);
+    announceMove(`${item.text} moved to position ${drag.toIndex + 1} of ${next.length}.`);
+    markSettled(drag.id);
+  }
+
+  function handleReorderPointerCancel() {
+    // Abort without committing: a cancelled gesture leaves the stored order untouched.
+    dragGeomRef.current = null;
+    setDragState(null);
   }
 
   // Mount load (D2): runs once; abort/ignore-safe under StrictMode double-invoke.
@@ -168,11 +335,19 @@ export default function App() {
     // a rapid double-edit whose newest send succeeds does not show a false positive.
     saveTodos(todos).then((ok) => {
       if (!ok) {
-        setNotice(
+        showNotice(
           'Your last change may not have been saved. Refresh to see the current list.'
         );
       }
     });
+  }, [todos]);
+
+  // Mirror the committed list into a ref after every render. The reorder handlers
+  // read (and, within a single un-rendered event batch, advance) this ref instead of
+  // the render-scope `todos` closure, so a reorder event dispatched before React
+  // re-renders still decides against the true current order rather than a stale one.
+  useEffect(() => {
+    latestOrderRef.current = todos;
   }, [todos]);
 
   // Clear the pending-undo timer on unmount so no expired callback fires after
@@ -183,6 +358,10 @@ export default function App() {
         clearTimeout(undoTimerRef.current);
         undoTimerRef.current = null;
       }
+      if (settleTimerRef.current !== null) {
+        clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -192,6 +371,20 @@ export default function App() {
   // never mutates state or issues a PUT, so the stored position order is untouched.
   const visible = sortByDate ? sortByDueDate(filtered) : filtered;
   const remaining = remainingCount(todos);
+
+  // Manual reorder is only coherent when the rendered list equals the stored list in
+  // order — i.e. the unfiltered All view with the default (manual) order. Anywhere
+  // else `visible` is a filtered subset or a derived order, so a rendered index has no
+  // stored position and reordering is disabled (a correctness guard, not just UX).
+  const reorderable = filter === 'all' && !sortByDate;
+
+  // Honor prefers-reduced-motion for the settle highlight and the lifted-row tilt (the
+  // functional translate that follows the pointer is kept). matchMedia is absent in
+  // some test/SSR shims, so guard it and default to full motion.
+  const reducedMotion =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // Capped setter for a text field (R4). Accepts the new value IFF it is within the
   // per-item code-point cap OR it does not GROW the current value — the second clause
@@ -207,7 +400,7 @@ export default function App() {
     ) {
       apply(next);
     } else {
-      setNotice(`Item text is limited to ${MAX_ITEM_CHARS} characters.`);
+      showNotice(`Item text is limited to ${MAX_ITEM_CHARS} characters.`);
     }
   }
 
@@ -217,7 +410,7 @@ export default function App() {
     // full and legacy over-full). No optimistic mutation, no PUT; the draft text is
     // left intact so the user's work is not lost.
     if (todos.length >= MAX_LIST_ITEMS) {
-      setNotice(
+      showNotice(
         `The list is full (${MAX_LIST_ITEMS} items max). Delete an item to add a new one.`
       );
       return;
@@ -307,7 +500,7 @@ export default function App() {
     // matching what editTodo actually stores (normalizeText trims), so an edit that is
     // only over-limit due to leading/trailing whitespace isn't falsely refused.
     if (itemCharCount(editText.trim()) > MAX_ITEM_CHARS) {
-      setNotice(`Item text is limited to ${MAX_ITEM_CHARS} characters.`);
+      showNotice(`Item text is limited to ${MAX_ITEM_CHARS} characters.`);
       return;
     }
     // editTodo no-ops on empty-after-trim (R5); the row exits edit mode regardless.
@@ -362,10 +555,26 @@ export default function App() {
           — never its descendant — so assistive-tech focus/announce behavior stays
           defined; a save-failure notice and the Undo affordance can show together. */}
       <div className="min-h-5 mb-2 flex items-center gap-2 text-sm">
-        <div role="status" aria-live="polite" className="flex-1">
-          {notice && <span className="text-destructive mr-2">{notice}</span>}
-          {pendingUndo && (
-            <span className="text-muted-foreground">{pendingUndo.label}</span>
+        <div
+          role="status"
+          aria-live="polite"
+          data-announce-seq={announcement ? announcement.seq : undefined}
+          className="flex-1"
+        >
+          {announcement ? (
+            // Keyed by the seq nonce so an identical repeated move message still
+            // remounts the text node and re-announces (R5). Mutually exclusive with the
+            // notice/undo content below — only one is ever set at a time.
+            <span key={announcement.seq} className="text-muted-foreground">
+              {announcement.text}
+            </span>
+          ) : (
+            <>
+              {notice && <span className="text-destructive mr-2">{notice}</span>}
+              {pendingUndo && (
+                <span className="text-muted-foreground">{pendingUndo.label}</span>
+              )}
+            </>
           )}
         </div>
         {pendingUndo && (
@@ -430,15 +639,76 @@ export default function App() {
         </Button>
       </div>
 
-      <ul className="list-none p-0 m-0">
-        {visible.map((todo) => (
+      <ul ref={ulRef} className="list-none p-0 m-0 relative">
+        {visible.map((todo) => {
+          const isDragged = dragState?.id === todo.id;
+          return (
           <li
             key={todo.id}
+            ref={(el) => {
+              if (el) rowRefs.current.set(todo.id, el);
+              else rowRefs.current.delete(todo.id);
+            }}
+            data-dragging={isDragged ? 'true' : undefined}
             className={cn(
-              'flex items-center gap-3 py-3 border-b border-border',
-              isOverdue(todo, today) && 'bg-destructive/10'
+              'group flex items-center gap-3 py-3 border-b border-border',
+              isOverdue(todo, today) && 'bg-destructive/10',
+              settleId === todo.id &&
+                cn('bg-accent', !reducedMotion && 'transition-colors'),
+              isDragged &&
+                'relative z-10 bg-card rounded-md shadow-lg cursor-grabbing'
             )}
+            style={
+              isDragged
+                ? {
+                    transform: reducedMotion
+                      ? `translateY(${dragState.liftOffset}px)`
+                      : `translateY(${dragState.liftOffset}px) rotate(-1deg)`,
+                  }
+                : undefined
+            }
           >
+            {/* Drag handle: first focusable control in the row (Tab order handle →
+                checkbox → text → Edit → Delete), sitting in a reserved ~20px gutter.
+                Hidden at rest and revealed on row hover/focus-within when reorder is
+                available; visible-but-dimmed and inert in a non-reorderable context
+                (a filter or Sort-by-date), where it carries a reason tooltip. */}
+            <button
+              type="button"
+              aria-label={`Reorder ${todo.text}`}
+              aria-disabled={!reorderable || undefined}
+              aria-describedby={
+                reorderable
+                  ? focusedReorderId === todo.id
+                    ? 'reorder-hint'
+                    : undefined
+                  : 'reorder-disabled-hint'
+              }
+              title={
+                reorderable
+                  ? undefined
+                  : 'Reordering is only available in the All view with manual order'
+              }
+              onKeyDown={(e) => handleReorderKeyDown(e, todo.id)}
+              onPointerDown={(e) => handleReorderPointerDown(e, todo.id)}
+              onPointerMove={handleReorderPointerMove}
+              onPointerUp={handleReorderPointerUp}
+              onPointerCancel={handleReorderPointerCancel}
+              onFocus={() => setFocusedReorderId(todo.id)}
+              onBlur={() =>
+                setFocusedReorderId((cur) => (cur === todo.id ? null : cur))
+              }
+              className={cn(
+                '-ml-1 flex h-9 w-5 shrink-0 touch-none select-none items-center justify-center rounded-md text-muted-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                reorderable
+                  ? 'cursor-grab opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing'
+                  : 'cursor-not-allowed opacity-40'
+              )}
+            >
+              <span aria-hidden="true" className="leading-none tracking-tighter">
+                ⋮⋮
+              </span>
+            </button>
             <Checkbox
               checked={todo.completed}
               onCheckedChange={() => handleToggle(todo.id)}
@@ -538,8 +808,51 @@ export default function App() {
               )}
             </div>
           </li>
-        ))}
+          );
+        })}
+        {/* Mid-drag overlays (R4): a dashed placeholder in the slot the lifted row
+            left, and a distinct drop-target line (with a leading dot) at the gap the
+            row would land in. Both are absolutely positioned so they add no layout,
+            keeping the captured row geometry stable, and are decorative to AT. */}
+        {dragState && (
+          <>
+            <div
+              aria-hidden="true"
+              data-source-gap="true"
+              className="pointer-events-none absolute left-0 right-0 rounded-md border border-dashed border-muted-foreground/60"
+              style={{
+                top: dragState.placeholderTop,
+                height: dragState.placeholderHeight,
+              }}
+            />
+            <div
+              aria-hidden="true"
+              data-drop-indicator="true"
+              className="pointer-events-none absolute left-0 right-0 h-0.5 bg-primary"
+              style={{ top: dragState.indicatorTop }}
+            >
+              <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-primary" />
+            </div>
+          </>
+        )}
       </ul>
+
+      {/* Keyboard-move hint (R3): shown and associated with the focused handle via
+          aria-describedby while reordering is available. In a disabled context the
+          handle's tooltip stands in for it, so this never renders there. */}
+      {reorderable && focusedReorderId !== null && (
+        <p id="reorder-hint" className="mt-2 text-xs text-muted-foreground">
+          Press ↑ / ↓ to move
+        </p>
+      )}
+
+      {/* Always-present, screen-reader-only reason a disabled handle is inert. Kept
+          out of the DOM flow visually (the handle's hover tooltip is the sighted
+          affordance) but permanently rendered so a disabled handle's
+          aria-describedby target never dangles. */}
+      <p id="reorder-disabled-hint" className="sr-only">
+        Reordering is only available in the All view with manual order
+      </p>
 
       <div className="flex items-center justify-between mt-4 text-sm">
         <span className="text-muted-foreground">{remaining} items left</span>
