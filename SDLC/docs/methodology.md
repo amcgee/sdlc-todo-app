@@ -113,7 +113,11 @@ the adversarial engineering workflow on the PR, where each **gate** is a hard st
    ledger entry names the test and both commits; CI checks the named tests exist **and
    re-executes the claim** (`SDLC/lib/spot_check.py` re-runs them at the recorded pre-fix
    commit — a test that passes there is a disproven claim and fails the gate). A fix
-   without a proving test does not count.
+   without a proving test does not count — **except an artifact-only fix** (a test oracle,
+   a doc, a comment: no product code changed, so the fail→pass model is structurally void),
+   which is proven by an **attestation** (`attest`) naming the files touched; CI confirms
+   each is outside `shipped_paths`, exactly as it confirms named tests exist. This is the
+   same "resolved by revision alone" carve-out the spec phase already has.
 7. **MERGE** — `arbiter` opens the gate only when there are **zero unresolved
    blockers/majors**, every fix has a proving test, and the **latest round is clean**.
 
@@ -127,7 +131,7 @@ survives with none, so fixes are always themselves attacked before release.
 Every consequential event is appended to the append-only record `.sdlc/ledger/rounds.jsonl` — the
 single source of truth. It lives outside `SDLC/` (configurable via the manifest's `ledger_dir`)
 so the framework directory stays immutable. Agents may not claim a gate is satisfied; they point at ledger entries
-that prove it. Entry types: `open`, `finding`, `rebut`, `defer`, `fix`, `test`, `verdict`,
+that prove it. Entry types: `open`, `finding`, `rebut`, `defer`, `fix`, `test`, `attest`, `verdict`,
 `round`, `note`, `gate`. Because the record is authoritative, the current position in the
 cycle is a pure function of it (`sdlc.py state`), which makes the pipeline resumable.
 
