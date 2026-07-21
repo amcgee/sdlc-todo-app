@@ -67,7 +67,11 @@ whether the round was clean. This is the core loop of the adversarial SDLC.
 4. **Fix & prove.** For each finding routed to fix: `builder` fixes (staying inside the
    plan's files-to-touch, or getting an arbiter ruling first), then `verifier` proves it —
    runs the new test at the pre-fix commit (FAIL) and post-fix (PASS) and records it with
-   `--test file[::name]` plus both SHAs. CI checks the named tests exist.
+   `--test file[::name]` plus both SHAs. CI checks the named tests exist. **A fix entirely
+   in non-product artifacts** (a test oracle, a doc, a comment — no product code, so no
+   fail→pass test can exist) is proven by an **attestation** instead: `sdlc.py attest --ref
+   <F-id> --by verifier --file <path>` naming every file touched; CI confirms each is
+   outside `shipped_paths` (see `verifier.md`).
 
 5. **Gate.** Run:
    ```
