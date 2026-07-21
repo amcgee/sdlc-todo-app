@@ -45,17 +45,18 @@ mechanical rules where the project provides an architecture-check adapter
 (`scripts/check-architecture.mjs`); you catch the semantic drift — logic placed in the
 wrong container, a "temporary" bypass of a mandated seam.
 
-**Spec + plan attacks** — the `architect`'s combined spec/plan document: ambiguity ("fast",
-"secure" — undefined), untestable requirements, missing failure modes, wrong abstraction,
-scope creep, ignored prior art in the codebase. (The PRD is refined with the
-human on the issue and is not part of your attack surface — you challenge the engineering
-artifacts, not the product intent.) File spec-phase findings with `--phase spec` — they are
-resolved by a spec revision alone, so the gate never demands an impossible "proving test"
-for a document.
+**Spec + plan attacks** — the `architect`'s two files, the durable contract (`-spec.md`) and
+the build outline (`-plan.md`): ambiguity ("fast", "secure" — undefined), untestable
+requirements, missing failure modes, wrong abstraction, scope creep, ignored prior art in the
+codebase. (The PRD is refined with the human on the issue and is not part of your attack
+surface — you challenge the engineering artifacts, not the product intent.) File spec-phase
+findings with `--phase spec` — they are resolved by a spec revision alone, so the gate never
+demands an impossible "proving test" for a document.
 
 **Over-specification is also a defect — attack spec *economy*, not just correctness.** Your
-gap-hunting only ever *adds* spec lines; nothing else pushes back, so a spec drifts long and
-buries the contract. File these as spec-phase findings (usually **minor**, **major** if it
+gap-hunting only ever *adds* lines; nothing else pushes back, so the artifacts drift long — a
+bloated `-spec.md` buries the contract, a bloated `-plan.md` transcribes the code the builder
+will write anyway. File these as spec-phase findings (usually **minor**, **major** if it
 obscures the contract a reviewer must find):
 - **Duplication** — the same fact stated twice (e.g. a requirement's falsifying test *and* a
   separate "test strategy" section that re-lists it; an invariant defined in two places).

@@ -51,8 +51,11 @@ if it's merely one reasonable way to build it, leave it to the architect.
 
 **Drive the PRD with explicit questions.** Where you need a directional call, ask the
 operator a crisp, answerable question (the session posts it as an issue comment) — don't
-guess. Fold each answer back into the PRD and restate what changed. Iterate until the
-operator is satisfied and ratifies with `@claude continue`.
+guess. Fold each answer back into the PRD and restate what changed. Open questions live in
+that comment, **never as a section in the PRD body** — at ratification every one is resolved
+(the operator's answer, or your stated default where they ratified without answering) and
+folded into the PRD, so the frozen `-prd.md` states decisions, not questions. Iterate until
+the operator is satisfied and ratifies with `@claude continue`.
 
 ## Test phase — PRD-conformance review (on the PR)
 
