@@ -12,6 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -359,6 +360,43 @@ describe('R5 — move announcement', () => {
     // Toggling writes the region (finalizes undo) -> the move text must be gone.
     fireEvent.click(within(screen.getByText('Alpha').closest('li')).getByRole('checkbox'));
     expect(screen.getByRole('status')).not.toHaveTextContent('moved to position');
+  });
+
+  it('two ArrowUp events batched with no intervening render decide against the latest order, not a stale one', async () => {
+    // Reproduce the batched race: on [Alpha,Bravo,Charlie,Delta], dispatch ArrowUp on
+    // Bravo then ArrowUp on Alpha inside ONE act() call so React commits neither until
+    // both handlers have run. Bravo's move to the front is real; when Alpha's event
+    // then runs, Alpha is no longer at the top (Bravo passed it). A handler that read
+    // the pre-batch render-scope order would take the boundary branch and falsely
+    // announce "Alpha is already at the top." while the committed order is
+    // [Bravo,Alpha,...]. Deciding against the latest order instead, Alpha's ArrowUp is
+    // a genuine move (index 1 -> 0), the two moves compose back to the original order,
+    // and the announcement matches what committed.
+    await renderSeeded(FOUR);
+    const bravoHandle = handleFor('Bravo');
+    const alphaHandle = handleFor('Alpha');
+    await act(async () => {
+      bravoHandle.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      );
+      alphaHandle.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      );
+    });
+
+    // Both moves composed on top of each other: Bravo up then Alpha up nets back to
+    // the original order (not [Bravo,Alpha,Charlie,Delta], which is Alpha's move lost).
+    expect(renderedOrder()).toEqual([
+      'Reorder Alpha',
+      'Reorder Bravo',
+      'Reorder Charlie',
+      'Reorder Delta',
+    ]);
+    // The announcement reflects Alpha's real move against the latest order, never the
+    // stale-closure boundary lie.
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Alpha moved to position 1 of 4.');
+    expect(status).not.toHaveTextContent('already at the top');
   });
 
   it('two successive ArrowUp presses at the top re-announce identical copy with an incremented seq', async () => {

@@ -91,6 +91,7 @@ export default function App() {
   const rowRefs = useRef(new Map()); // id -> row <li> element, for reading drag geometry
   const ulRef = useRef(null); // the list <ul>, the positioning context for drag overlays
   const dragGeomRef = useRef(null); // row bands snapshot captured at pointerdown for the active drag
+  const latestOrderRef = useRef([]); // newest committed/intended list order — the reorder handlers' source of truth
   const seqRef = useRef(0);
   const hydratedRef = useRef(false); // authoritative gate (read sync in save effect)
   const skipNextSaveRef = useRef(false); // suppress the load-applied echo (D2 step 3)
@@ -160,23 +161,31 @@ export default function App() {
     if (!reorderable) return;
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
-    const index = todos.findIndex((t) => t.id === id);
+    // Decide every branch — boundary vs. move, the target, and the announcement —
+    // against the newest order, not the render-scope closure. `latestOrderRef` holds
+    // the committed order and is advanced below the moment a move is computed, so a
+    // second key event in the same batch (before React re-renders) sees the first
+    // move's result: it can't falsely report "already at the top/bottom" for an item
+    // an earlier event just moved past, and the announcement always matches the order
+    // that actually commits.
+    const base = latestOrderRef.current;
+    const index = base.findIndex((t) => t.id === id);
     if (index === -1) return;
-    const item = todos[index];
+    const item = base[index];
     const target = index + (e.key === 'ArrowUp' ? -1 : 1);
     if (target < 0) {
       announceMove(`${item.text} is already at the top.`);
       return;
     }
-    if (target > todos.length - 1) {
+    if (target > base.length - 1) {
       announceMove(`${item.text} is already at the bottom.`);
       return;
     }
-    // Compute the moved list once and announce from THAT result, so the aria-live
-    // text is derived from the exact list being committed — it can never diverge
-    // from the stored order, even if a second reorder event is handled before React
-    // re-renders.
-    const next = moveTodo(todos, id, target);
+    // The next list is a fully-composed absolute order (computed on top of `base`),
+    // so advancing the ref and committing it directly still composes rapid batched
+    // moves — each event builds on the prior one instead of dropping it.
+    const next = moveTodo(base, id, target);
+    latestOrderRef.current = next;
     setTodos(next);
     announceMove(`${item.text} moved to position ${target + 1} of ${next.length}.`);
     markSettled(id);
@@ -243,13 +252,17 @@ export default function App() {
       // capture may already be gone; nothing to release
     }
     if (!drag) return;
-    const index = todos.findIndex((t) => t.id === drag.id);
+    // Resolve against the newest order (see the keyboard handler): the same ref that
+    // survives an un-rendered batch drives the origin check, the no-op guard, and the
+    // announcement, so a drop landing after another reorder in the same batch can't
+    // announce a stale item/position or drop the earlier move.
+    const base = latestOrderRef.current;
+    const index = base.findIndex((t) => t.id === drag.id);
     if (index === -1) return;
     if (drag.toIndex === index) return; // dropped back on its origin -> no move, no PUT (R4)
-    const item = todos[index];
-    // Announce from the same list the move commits (see the keyboard handler), so the
-    // aria-live text always matches the committed order.
-    const next = moveTodo(todos, drag.id, drag.toIndex);
+    const item = base[index];
+    const next = moveTodo(base, drag.id, drag.toIndex);
+    latestOrderRef.current = next;
     setTodos(next);
     announceMove(`${item.text} moved to position ${drag.toIndex + 1} of ${next.length}.`);
     markSettled(drag.id);
@@ -327,6 +340,14 @@ export default function App() {
         );
       }
     });
+  }, [todos]);
+
+  // Mirror the committed list into a ref after every render. The reorder handlers
+  // read (and, within a single un-rendered event batch, advance) this ref instead of
+  // the render-scope `todos` closure, so a reorder event dispatched before React
+  // re-renders still decides against the true current order rather than a stale one.
+  useEffect(() => {
+    latestOrderRef.current = todos;
   }, [todos]);
 
   // Clear the pending-undo timer on unmount so no expired callback fires after
